@@ -9,18 +9,43 @@ class CommandParser:
         if not cmd:
             return None
 
-        # Helper: extract unit ID from any command
         def extract_unit_id(text):
             m = re.search(r'\b([a-z][0-9]+)\b', text)
             if m:
                 return int(m.group(1)[1:])
-            # Also try plain digit
             m = re.search(r'\b(\d+)\b', text)
             if m:
                 return int(m.group(1))
             return None
 
-        # ----- RELATIVE MOVEMENT (e.g., "move I3 two tiles east") -----
+        # ----- Recon drone deploy -----
+        if "deploy recon" in cmd or "launch recon" in cmd:
+            unit_id = extract_unit_id(cmd) or 1
+            return {
+                "action_type": "deploy_recon_drone",
+                "unit_id": unit_id,
+                "target_tile": None,
+                "target_unit_id": None,
+                "parameters": {"radius": 5},
+                "narrative_reason": "Deploy recon drone"
+            }
+
+        # ----- FPV kamikaze attack -----
+        if ("fpv" in cmd or "kamikaze" in cmd) and "at" in cmd:
+            m = re.search(r'at\s+([a-z][0-9]+)', cmd)
+            if m:
+                target_id = int(m.group(1)[1:])
+                unit_id = extract_unit_id(cmd) or 1
+                return {
+                    "action_type": "fpv_attack",
+                    "unit_id": unit_id,
+                    "target_tile": None,
+                    "target_unit_id": target_id,
+                    "parameters": {},
+                    "narrative_reason": f"FPV drone attack on {target_id}"
+                }
+
+        # ----- Relative movement -----
         rel_patterns = [
             r'move\s+([a-z][0-9]+)\s+(?:(\d+)\s*(?:tile|step|space)s?\s*)?(north|south|east|west|ne|nw|se|sw|n|s|e|w)',
             r'go\s+([a-z][0-9]+)\s+(?:(\d+)\s*(?:tile|step|space)s?\s*)?(north|south|east|west|ne|nw|se|sw|n|s|e|w)',
@@ -43,7 +68,6 @@ class CommandParser:
                 if unit:
                     new_x = unit.x + (dx * distance)
                     new_y = unit.y + (dy * distance)
-                    # Clamp to map bounds
                     new_x = max(0, min(new_x, len(game_state.map_grid[0]) - 1))
                     new_y = max(0, min(new_y, len(game_state.map_grid) - 1))
                     return {
@@ -55,7 +79,7 @@ class CommandParser:
                         "narrative_reason": f"Move {distance} tile(s) {direction}"
                     }
 
-        # ----- ABSOLUTE MOVEMENT (e.g., "move R1 to 10,5" or "move 3 to 5 7") -----
+        # ----- Absolute movement -----
         abs_patterns = [
             r'move\s+([a-z][0-9]+)\s+(?:to\s+)?(\d+)[,\s]+(\d+)',
             r'move\s+(\d+)\s+(?:to\s+)?(\d+)[,\s]+(\d+)',
@@ -81,7 +105,7 @@ class CommandParser:
                         "narrative_reason": f"Move unit {unit_id} to ({x},{y})"
                     }
 
-        # ----- FIRE / SUPPRESS -----
+        # ----- Fire / suppress -----
         fire_patterns = [
             r'(?:fire|shoot|engage)\s+(?:at\s+)?([a-z][0-9]+)',
             r'([a-z][0-9]+)\s+(?:fire|shoot|engage)\s+(?:at\s+)?([a-z][0-9]+)',
@@ -104,7 +128,6 @@ class CommandParser:
                     except:
                         continue
                     shooter_id = extract_unit_id(cmd) or 1
-                # Validate target exists
                 if any(u.id == target_id for u in game_state.enemy_units if not u.destroyed):
                     action_type = "suppress" if "suppress" in cmd else "fire"
                     return {
@@ -116,7 +139,7 @@ class CommandParser:
                         "narrative_reason": f"Unit {shooter_id} fires at enemy {target_id}"
                     }
 
-        # ----- ARTILLERY -----
+        # ----- Artillery -----
         arty_patterns = [
             r'(?:artillery|arty|shell)\s+(?:on|at|strike)?\s*(\d+)[,\s]+(\d+)',
             r'call\s+(?:artillery|arty)\s+(?:on|at)?\s*(\d+)[,\s]+(\d+)',
@@ -135,7 +158,7 @@ class CommandParser:
                         "narrative_reason": f"Artillery strike on ({x},{y})"
                     }
 
-        # ----- RECON -----
+        # ----- Recon (area) -----
         if "recon" in cmd or "scout" in cmd:
             m = re.search(r'(\d+)[,\s]+(\d+)', cmd)
             if m:
@@ -159,7 +182,7 @@ class CommandParser:
                     "narrative_reason": "General recon"
                 }
 
-        # ----- FALLBACK: LLM (if available) -----
+        # ----- LLM fallback -----
         if self.llm and self.llm.api_key:
             summary = {
                 "turn": game_state.turn,

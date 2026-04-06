@@ -20,43 +20,26 @@ def render_progress_bar(value, max_value, width=6):
     return f"{color}{bar}{ANSI['RESET']} {pct}%"
 
 def render_full_tactical_hud(game_state, map_render):
-    """Render the tactical HUD exactly as in the approved mockup."""
     clear_screen()
     cols, _ = shutil.get_terminal_size((80, 24))
     faction_color = ANSI.get(f"{game_state.player_faction}_BLUE", ANSI["BORDER"])
-
-    # Top border
     print("╔" + "═" * (cols - 2) + "╗")
-
-    # Header line
     header = f"║ CONTACT FRONT │ TACTICAL │ {faction_color}{game_state.player_faction}{ANSI['RESET']} — {game_state.mode.upper()} │ TURN: {game_state.turn}/{game_state.max_turns} │ ☀️ DAY "
     print(header + " " * (cols - len(header) - 1) + "║")
-
-    # Separator
     print("╠" + "═" * (cols - 2) + "╣")
-
-    # Objective line
     obj_desc = game_state.objectives[0].get('desc', 'Secure objective') if game_state.objectives else 'Capture area'
     obj_line = f"║ OBJECTIVE: {obj_desc} (★) │ {game_state.max_turns - game_state.turn} turns remaining "
     print(obj_line + " " * (cols - len(obj_line) - 1) + "║")
-
-    # Separator before map
     print("╠" + "═" * (cols - 2) + "╣")
-
-    # Map (indented by 2 spaces inside the box)
     map_lines = map_render.split('\n')
     for line in map_lines:
-        # Ensure line doesn't exceed available width (cols - 4 for borders + 2 spaces)
         max_line_len = cols - 4
         if len(line) > max_line_len:
             line = line[:max_line_len]
         print("║  " + line + " " * (max_line_len - len(line)) + "  ║")
-
-    # Separator after map
     print("╠" + "═" * (cols - 2) + "╣")
 
-    # Three-column panel: UNITS, RESOURCES, ENEMY INTEL
-    # Prepare unit lines (max 4 units)
+    # Unit panel (left)
     friendly = [u for u in game_state.friendly_units if not u.destroyed]
     unit_lines = []
     for u in friendly[:4]:
@@ -65,19 +48,18 @@ def render_full_tactical_hud(game_state, map_render):
         unit_lines.append(f"    MOR:{render_progress_bar(u.morale,100,6)}")
         unit_lines.append(f"    AMMO:{render_progress_bar(u.ammo,u.max_ammo,5)}")
         unit_lines.append("")
-    # Fill to at least 15 lines for alignment
     while len(unit_lines) < 15:
         unit_lines.append("")
 
-    # Resources panel
+    # Resources panel (center) – real casualties
     res_lines = [
         f" Artillery: {game_state.artillery_fires_remaining} fires",
         f" CAS: {game_state.cas_available}",
         f" Smoke: {game_state.smoke_grenades} grenades",
         "",
         " CASUALTIES",
-        f" KIA: {random.randint(1,5)} / WIA: {random.randint(2,8)}",
-        f" Vehicles lost: 0",
+        f" KIA: {game_state.friendly_kia} / WIA: {game_state.friendly_wia}",
+        f" Vehicles lost: {game_state.vehicles_lost}",
         "",
         "",
         ""
@@ -85,7 +67,7 @@ def render_full_tactical_hud(game_state, map_render):
     while len(res_lines) < 15:
         res_lines.append("")
 
-    # Enemy intel panel
+    # Enemy intel panel (right)
     visible_enemies = len([e for e in game_state.enemy_units if not e.destroyed])
     enemy_lines = [
         f" ⚠️ {visible_enemies} squad{'s' if visible_enemies != 1 else ''} est.",
@@ -102,59 +84,43 @@ def render_full_tactical_hud(game_state, map_render):
     while len(enemy_lines) < 15:
         enemy_lines.append("")
 
-    # Print three columns with fixed widths (28, 26, 24) to fit 80 cols
+    # Print three columns
     for i in range(15):
         left = unit_lines[i][:28] if i < len(unit_lines) else ""
         center = res_lines[i][:26] if i < len(res_lines) else ""
         right = enemy_lines[i][:24] if i < len(enemy_lines) else ""
         print(f"║ {left:<28} │ {center:<26} │ {right:<24} ║")
 
-    # Separator before command line
     print("╠" + "═" * (cols - 2) + "╣")
-
-    # Command prompt line
     print(f"║ > Your command: {'_'*40} ║")
-
-    # Separator before narrative
     print("╠" + "═" * (cols - 2) + "╣")
-
-    # Narrative box (last action)
     narrative = game_state.narrative_log[-1] if game_state.narrative_log else "Awaiting orders."
     max_narrative_len = cols - 4
     for i in range(0, len(narrative), max_narrative_len):
         chunk = narrative[i:i+max_narrative_len]
         print(f"║ {chunk:<{max_narrative_len}} ║")
-
-    # Bottom border
     print("╚" + "═" * (cols - 2) + "╝")
 
-    # Actual input prompt (will be read by the game loop)
-    print(f"{ANSI['TITLE']}> {ANSI['RESET']}", end="", flush=True)
-
 def render_strategic_hud(game_state, map_render):
-    """Render the strategic HUD exactly as in the approved mockup."""
     clear_screen()
     cols, _ = shutil.get_terminal_size((80, 24))
     faction_color = ANSI.get(f"{game_state.player_faction}_BLUE", ANSI["BORDER"])
     nuclear_posture = "N/A" if game_state.player_faction == "IRAN" else ("LOCKED" if not game_state.nuclear_authorized else "AUTHORIZED")
-
     print("╔" + "═" * (cols - 2) + "╗")
     header = f"║ CONTACT FRONT │ STRATEGIC │ {faction_color}{game_state.player_faction}{ANSI['RESET']} │ TURN: {game_state.turn}/{game_state.max_turns} │ 🌙 NIGHT "
     print(header + " " * (cols - len(header) - 1) + "║")
     esc_line = f"║ ESCALATION: {'█' * game_state.escalation_level}{'░' * (6-game_state.escalation_level)} LVL {game_state.escalation_level}/6  │  ALERT: DEFCON {4-game_state.escalation_level}        │  NUCLEAR POSTURE: {nuclear_posture} "
     print(esc_line + " " * (cols - len(esc_line) - 1) + "║")
     print("╠" + "═" * (cols - 2) + "╣")
-
     map_lines = map_render.split('\n')
     for line in map_lines:
         max_line_len = cols - 4
         if len(line) > max_line_len:
             line = line[:max_line_len]
         print("║  " + line + " " * (max_line_len - len(line)) + "  ║")
-
     print("╠" + "═" * (cols - 2) + "╣")
 
-    # Asset, enemy, intel panels
+    # Asset panel (generic – will be faction‑aware in full implementation)
     asset_lines = [
         "[M] Missile battery", "  Tehran (2 units)", "[A] Air defense", "  Tehran (1 unit)",
         "[D] Drone swarm", "  Qom (hidden)", "", "", "", ""
@@ -200,4 +166,3 @@ def render_strategic_hud(game_state, map_render):
     print("╠" + "═" * (cols - 2) + "╣")
     print(f"║ > Your command: {'_'*40} ║")
     print("╚" + "═" * (cols - 2) + "╝")
-    print(f"{ANSI['TITLE']}> {ANSI['RESET']}", end="", flush=True)

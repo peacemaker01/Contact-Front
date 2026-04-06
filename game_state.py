@@ -15,8 +15,8 @@ class Unit:
     ammo: int
     max_ammo: int
     armor: int
-    movement: int          # base movement points per turn
-    movement_points: int   # remaining this turn
+    movement: int
+    movement_points: int
     accuracy_base: int
     suppress_threshold: int
     emoji: str
@@ -56,6 +56,10 @@ class TacticalGameState:
     objectives: List[Dict]
     action_log: List[str]
     narrative_log: List[str]
+    friendly_kia: int = 0
+    friendly_wia: int = 0
+    vehicles_lost: int = 0
+    enemy_kia: int = 0
     game_over: bool = False
     victory: Optional[bool] = None
 
@@ -74,7 +78,6 @@ class StrategicGameState:
     known_opponent_actions: List[str]
     strike_log: List[Dict]
     narrative_log: List[str]
-    # Intel tracking: asset_id -> last_seen_turn
     enemy_asset_last_seen: Dict[str, int] = field(default_factory=dict)
     game_over: bool = False
     victory: Optional[bool] = None
