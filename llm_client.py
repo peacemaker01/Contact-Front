@@ -1,4 +1,4 @@
-# llm_client.py
+# llm_client.py - Complete
 import os
 import json
 import re
@@ -25,7 +25,7 @@ def terrain_to_zone(word: str) -> str:
 def local_parse(command: str) -> dict:
     cmd = command.lower().strip()
 
-    # Specific info questions (must come first)
+    # Specific info questions
     if re.search(r'\b(what does the drone see|what does drone see|drone view|drone feed)\b', cmd):
         return {"type": "info", "parser": "local"}
 
@@ -37,15 +37,15 @@ def local_parse(command: str) -> dict:
     if re.search(r'\brecon by fire\b', cmd):
         return {"type": "attack", "zone": "medium", "parser": "local"}
 
-    # General info / question (no turn consumption)
-    if re.search(r'\b(what|show|tell|see|status|where|how many)\b', cmd) and not re.search(r'\b(mortar|advance|fire|attack|recon|surrender|fpv|missile|nuke|warship|intel|ew|cyber|space|psyops|resupply|produce|sanction|clear ieds|sigint|jamming|targets|roe|advise)\b', cmd):
+    # General info
+    if re.search(r'\b(what|show|tell|see|status|where|how many)\b', cmd) and not re.search(r'\b(mortar|advance|fire|attack|recon|surrender|fpv|missile|nuke|warship|intel|ew|cyber|space|psyops|resupply|produce|sanction|clear ieds|sigint|jamming|targets|roe|advise|overwatch|heal|interrogate|supply)\b', cmd):
         return {"type": "info", "parser": "local"}
 
-    # Advisor command
+    # Advisor
     if re.search(r'\b(advise|suggest|what should i do|recommend)\b', cmd):
         return {"type": "advise", "parser": "local"}
 
-    # Intel command
+    # Intel
     if re.search(r'\b(intel|intelligence|enemy status|what are the enemy doing)\b', cmd):
         return {"type": "intel", "parser": "local"}
 
@@ -53,7 +53,7 @@ def local_parse(command: str) -> dict:
     if re.search(r'\b(recon|scan|spot|launch drone|recon drone|eye in the sky)\b', cmd):
         return {"type": "recon", "parser": "local"}
 
-    # FPV drone (but not if it's a question)
+    # FPV drone
     if re.search(r'\b(fp?v?|drone|kamikaze|suicide drone|strike)\b', cmd) and not re.search(r'\b(recon|mortar)\b', cmd):
         target_match = re.search(r'(?:drone|fpv|strike|kill|after)\s+(.+?)(?:\.|$| and | then )', cmd)
         target = target_match.group(1).strip() if target_match else None
@@ -101,6 +101,27 @@ def local_parse(command: str) -> dict:
                 zone = terrain_to_zone(word)
                 break
         return {"type": "attack", "zone": zone, "parser": "local"}
+
+    # Overwatch
+    if re.search(r'\b(overwatch|cover|watch)\b', cmd):
+        zone = "medium"
+        for z in ["close","medium","long","extreme"]:
+            if z in cmd:
+                zone = z
+                break
+        return {"type": "overwatch", "zone": zone, "parser": "local"}
+
+    # Heal
+    if re.search(r'\b(heal|medic)\b', cmd):
+        return {"type": "heal", "parser": "local"}
+
+    # Interrogate
+    if re.search(r'\b(interrogate|question|prisoner)\b', cmd):
+        return {"type": "interrogate", "parser": "local"}
+
+    # Supply line
+    if re.search(r'\b(supply|supply line|logistics)\b', cmd):
+        return {"type": "supply", "parser": "local"}
 
     # ========== STRATEGIC COMMANDS ==========
     if re.search(r'\b(targets|what can i strike|strike options|list targets)\b', cmd):
@@ -180,12 +201,12 @@ def llm_parse(command: str, provider: str, api_key: str) -> dict:
     config = PROVIDERS.get(provider, PROVIDERS["openrouter"])
     system_prompt = """You are a military tactics interpreter. Convert the player's command into JSON.
 Possible types: "mortar", "fpv", "recon", "advance", "attack", "surrender", "info", "advise", "intel", "targets",
-"missile", "naval", "intel", "ew", "nuke", "loitering", "cyber", "space", "psyops", "resupply", "produce", "sanction", "clear_ieds", "roe", "compound", "unknown".
+"missile", "naval", "intel", "ew", "nuke", "loitering", "cyber", "space", "psyops", "resupply", "produce", "sanction", "clear_ieds", "roe", "compound", "unknown", "overwatch", "heal", "interrogate", "supply".
 For mortar: include "zone" and "quantity".
 For fpv: include "target".
 For advance/attack: include "zone".
-For missile: include "missile_type" (ballistic/cruise/hypersonic/anti_ship) and "target_asset".
-If command contains multiple actions (e.g., "fire missiles and deploy drones"), respond with {"type": "compound", "reason": "Please issue one action at a time."}.
+For missile: include "missile_type" and "target_asset".
+For overwatch: include "zone".
 Output ONLY valid JSON."""
     try:
         if provider == "claude":
@@ -216,7 +237,7 @@ def validate_intent(intent: dict) -> tuple[bool, str]:
     if "type" not in intent:
         return False, "Intent missing 'type' field."
     itype = intent["type"]
-    if itype in ["compound", "info", "advise", "intel", "targets", "roe", "unknown"]:
+    if itype in ["compound", "info", "advise", "intel", "targets", "roe", "unknown", "overwatch", "heal", "interrogate", "supply"]:
         return True, ""
     if itype in ["mortar", "advance", "attack"]:
         if "zone" not in intent:
@@ -272,22 +293,18 @@ Return ONLY the sentence, no quotes."""
     return "The battle continues."
 
 def generate_llm_intel(state, api_key, provider="openrouter"):
-    """Generate a rich intelligence report using LLM."""
     if not api_key:
         return None
     enemies = [u for u in state.units if u.side != state.player_side and u.is_alive()]
     if not enemies:
         return "No enemy forces detected."
     enemy_list = "\n".join([f"- {u.name} (morale {u.morale}, {u.zone} zone, status {u.status})" for u in enemies])
-    player_zone = "unknown"
-    for u in state.units:
-        if u.side == state.player_side and u.is_alive():
-            player_zone = u.zone
-            break
-    prompt = f"""You are a tactical intelligence analyst. Based on the following data, write a short, vivid paragraph (2-3 sentences) describing the enemy's current situation, posture, likely intentions, and any notable behavior (e.g., RPG gunner aiming, panicked units fleeing).
+    player_zone = next((u.zone for u in state.units if u.side == state.player_side and u.is_alive()), "unknown")
+    prompt = f"""You are a tactical intelligence analyst. Based on the following data, write a short, vivid paragraph (2-3 sentences) describing the enemy's current situation, posture, likely intentions, and any notable behavior.
 
 Player position: {player_zone}
 Weather: {state.weather}
+Time of day: {state.time_of_day}
 Objective zone: {state.objective_zone}
 Recon active: {state.recon_active > 0}
 Enemy units:

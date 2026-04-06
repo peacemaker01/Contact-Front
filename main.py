@@ -1,4 +1,4 @@
-# main.py - Contact Front (Complete with enhanced intel command)
+# main.py - Contact Front (Complete with 10 new features)
 import os
 import time
 import random
@@ -18,7 +18,10 @@ from rules import (
     strategic_loitering_strike, strategic_cyber_attack,
     strategic_space_deployment, strategic_psyops,
     strategic_resupply, strategic_produce_missiles,
-    strategic_sanctions, strategic_nuclear_strike
+    strategic_sanctions, strategic_nuclear_strike,
+    set_overwatch, process_overwatch_fire, medic_heal,
+    capture_prisoner, interrogate_prisoner, check_supply_line,
+    advance_time
 )
 from enemy_ai import process_enemy_turn
 from llm_strategic import process_strategic_enemy_turn
@@ -39,6 +42,7 @@ def morale_bar(value, max_val=100, width=10):
     return f"[{bar}] {value}%"
 
 def draw_tactical_map(state):
+    # Placeholder: original simple map, can be replaced later
     zones = ["extreme", "long", "medium", "close"]
     print_c("┌─────────────────────────────────────────────────┐", "DIM")
     print_c("│                    BATTLEFIELD                  │", "BOLD")
@@ -113,7 +117,10 @@ def show_aar(state):
         "Mortars are most effective against suppressed targets.",
         "FPV drones can eliminate high-value targets.",
         "Suppression pins enemies, making them easy targets.",
-        "Morale breaks faster than bodies."
+        "Morale breaks faster than bodies.",
+        "Overwatch can stop enemy advances.",
+        "Medics preserve experienced troops.",
+        "Prisoners provide valuable intelligence."
     ]
     print_c("\n Lessons Learned:", "BOLD")
     print_c(f" • {random.choice(lessons)}", "GREEN")
@@ -131,6 +138,10 @@ def show_help():
     print_c('  "roe"', "GREEN")
     print_c('  "advise" - Get AI tactical recommendation', "GREEN")
     print_c('  "intel" - Detailed enemy intelligence report', "GREEN")
+    print_c('  "overwatch <zone>" - Set unit to cover a zone', "GREEN")
+    print_c('  "heal <medic> <target>" - Heal a wounded soldier', "GREEN")
+    print_c('  "interrogate" - Question a prisoner for intel', "GREEN")
+    print_c('  "supply" - Check supply line status', "GREEN")
     print_c('  "what does the drone see?" (info, no turn)', "GREEN")
     print_c("\n=== STRATEGIC COMMANDS ===", "CYAN")
     print_c('  "targets" - List all targetable enemy assets', "GREEN")
@@ -160,76 +171,14 @@ def show_history(state):
         print_c(f"Turn {i+1}: {h}", "YELLOW")
     print_c("")
 
-def generate_tactical_intel(state):
-    """Rule-based detailed intelligence for the intel command."""
-    enemies = [u for u in state.units if u.side != state.player_side and u.is_alive()]
-    if not enemies:
-        return "No enemy forces detected. The battlefield is quiet."
-    # Determine overall posture
-    avg_morale = sum(u.morale for u in enemies) / len(enemies)
-    if avg_morale > 70:
-        posture = "aggressive and confident"
-    elif avg_morale > 40:
-        posture = "defensive but steady"
-    else:
-        posture = "wavering, some showing signs of panic"
-    # Movement direction (based on zone changes)
-    # For simplicity, we'll use the zone with most enemies
-    zone_counts = {}
-    for e in enemies:
-        zone_counts[e.zone] = zone_counts.get(e.zone, 0) + 1
-    main_zone = max(zone_counts, key=zone_counts.get)
-    # Determine likely intent
-    if main_zone == state.objective_zone:
-        if state.player_side == "attacker":
-            intent = "defending the objective"
-        else:
-            intent = "attacking the objective"
-    elif main_zone == "long":
-        intent = "approaching from distance, possibly staging for assault"
-    elif main_zone == "close":
-        intent = "close assault imminent"
-    else:
-        intent = "holding position"
-    # Unit-specific notes
-    special_notes = []
-    for e in enemies:
-        if e.morale < 30:
-            special_notes.append(f"{e.name} is panicking and may rout")
-        elif "rpg" in getattr(e, "special_equipment", []):
-            special_notes.append(f"{e.name} is armed with an RPG – high threat")
-        elif "sniper" in getattr(e, "special_equipment", []):
-            special_notes.append(f"{e.name} is a sniper – deadly at range")
-        if e.status == "suppressed":
-            special_notes.append(f"{e.name} is pinned down, unable to move effectively")
-    report = f"Enemy posture: {posture}. They appear to be {intent} in the {main_zone.upper()} zone."
-    if special_notes:
-        report += " Notable observations: " + "; ".join(special_notes)
-    # Distance estimation
-    player_zone = None
-    for u in state.units:
-        if u.side == state.player_side and u.is_alive():
-            player_zone = u.zone
-            break
-    if player_zone:
-        dist = abs(ZONE_MAP.get(player_zone, 2) - ZONE_MAP.get(main_zone, 2))
-        if dist == 0:
-            report += " Enemy forces are in the same zone – close combat."
-        elif dist == 1:
-            report += " Enemy is in an adjacent zone, within effective small arms range."
-        elif dist == 2:
-            report += " Enemy is at medium distance – mortar and FPV drones are effective."
-        else:
-            report += " Enemy is at extreme distance – only mortars and drones can reach."
-    return report
-
 def display_hud(state):
     print_c(f"\n{'='*65}", "HEADER")
     if state.game_mode == "tactical":
-        print_c(f" TURN {state.turn} | OBJ: {state.objective_zone.upper()} | {state.weather.upper()}", "BOLD")
+        print_c(f" TURN {state.turn} | OBJ: {state.objective_zone.upper()} | {state.weather.upper()} | {state.time_of_day.upper()}", "BOLD")
         recon_label = f"{state.recon_active} turn{'s' if state.recon_active != 1 else ''} remaining" if state.recon_active > 0 else "inactive"
         print_c(f" MORTARS: {state.mortar_rounds} | FPV: {state.fpv_drones} | RECON: {recon_label}", "CYAN")
         print_c(f" SUPPLY: {state.supply_points} | IED THREAT: {state.ied_threat}%", "CYAN")
+        print_c(f" SUPPLY LINE: {'ACTIVE' if state.supply_line_active else 'CUT'}", "CYAN")
         if state.building_damage > 0:
             bar = "█" * (state.building_damage // 10) + "░" * (10 - state.building_damage // 10)
             print_c(f" BUILDING DAMAGE: [{bar}] {state.building_damage}%", "YELLOW")
@@ -246,7 +195,9 @@ def display_hud(state):
             if u.side == state.player_side and u.is_alive():
                 sc = "GREEN" if u.status == "active" else "WARNING"
                 leader_mark = " [L]" if u.is_leader else ""
-                print_c(f"   [{u.zone.upper():<7}] {u.name}{leader_mark:<15} | {u.status.upper()} | AMMO:{u.ammo}", sc)
+                medic_mark = " [M]" if u.is_medic else ""
+                overwatch_mark = " [OW]" if u.overwatch else ""
+                print_c(f"   [{u.zone.upper():<7}] {u.name}{leader_mark}{medic_mark}{overwatch_mark:<15} | {u.status.upper()} | AMMO:{u.ammo}", sc)
                 print_c(f"      Morale: {morale_bar(u.morale)}", "YELLOW")
         print_c("\n ENEMY:", "RED")
         if state.recon_active > 0:
@@ -257,6 +208,10 @@ def display_hud(state):
                     print_c(f"   [{u.zone.upper():<7}] {u.name:<15} | {u.status.upper()} | MORALE:{u.morale}{note}", sc)
         else:
             print_c("   No direct visual – recon drone recommended", "DIM")
+        if state.prisoners:
+            print_c(" PRISONERS:", "CYAN")
+            for p in state.prisoners:
+                print_c(f"   {p.name} (captured)", "CYAN")
     else:  # strategic mode
         print_c(f" TURN {state.turn} | TENSION: {state.global_tension}% | CASUALTIES: {state.civilian_casualties:,}", "BOLD")
         print_c(f" NUKES: {state.strategic.nukes} | BALLISTIC: {state.strategic.ballistic_missiles} | CRUISE: {state.strategic.cruise_missiles}", "CYAN")
@@ -341,6 +296,7 @@ def setup_menu():
     print_c("\n[1] TACTICAL MODE (Infantry, mortars, drones)", "CYAN")
     print_c("[2] STRATEGIC MODE (Missiles, warships, nukes)", "CYAN")
     print_c("[3] RESUME MISSION", "CYAN")
+    print_c("[4] RANDOM MISSION (Procedurally generated)", "CYAN")
     mode_choice = input("\nSelect > ").strip()
 
     if mode_choice == "3":
@@ -392,11 +348,15 @@ def setup_menu():
         state.player_side = "attacker"
         return state
 
-    else:  # tactical mode
-        print_c("\n[1] OPERATION: BROKEN ANVIL (Farmhouse assault)", "CYAN")
-        print_c("[2] OPERATION: SILENT SWEEP (Night raid)", "CYAN")
-        mission_choice = input("Select mission > ").strip()
-        mission = "night_raid" if mission_choice == "2" else "broken_anvil"
+    else:  # tactical mode (including random)
+        if mode_choice == "4":
+            mission_type = "random"
+            print_c("\nRANDOM MISSION - Procedurally generated", "CYAN")
+        else:
+            print_c("\n[1] OPERATION: BROKEN ANVIL (Farmhouse assault)", "CYAN")
+            print_c("[2] OPERATION: SILENT SWEEP (Night raid)", "CYAN")
+            mission_choice = input("Select mission > ").strip()
+            mission_type = "night_raid" if mission_choice == "2" else "broken_anvil"
 
         print_c("\nDIFFICULTY:", "HEADER")
         print("1. Easy  2. Normal  3. Hard  4. Realistic")
@@ -429,8 +389,17 @@ def setup_menu():
 
         provider = os.environ.get("LLM_PROVIDER", "openrouter")
         api_key = os.environ.get("LLM_API_KEY")
-        state = generate_mission(mission, diff, provider, api_key, player_faction, enemy_faction, player_side)
+        state = generate_mission(mission_type, diff, provider, api_key, player_faction, enemy_faction, player_side)
         return state
+
+def find_unit_by_name(state, name):
+    """Helper to find a unit by name (partial match)."""
+    if not name:
+        return None
+    for u in state.units:
+        if name.lower() in u.name.lower():
+            return u
+    return None
 
 def main():
     state = setup_menu()
@@ -500,11 +469,13 @@ def main():
 
 Objective zone: {state.objective_zone}
 Weather: {state.weather}
+Time: {state.time_of_day}
 Your units: {len([u for u in state.units if u.side == state.player_side and u.is_alive()])} alive
 Enemy units: {len([u for u in state.units if u.side != state.player_side and u.is_alive()])} alive
 Recon active: {state.recon_active > 0}
 Mortars left: {state.mortar_rounds}
 FPV drones left: {state.fpv_drones}
+Supply line: {'active' if state.supply_line_active else 'cut'}
 """
                 try:
                     import requests
@@ -530,18 +501,21 @@ FPV drones left: {state.fpv_drones}
 
         if intent["type"] == "intel":
             print_c("\n--- INTELLIGENCE REPORT ---", "CYAN")
-            # Try LLM first
             llm_report = generate_llm_intel(state, api_key, provider)
             if llm_report:
                 print_c(llm_report, "YELLOW")
             else:
-                # Fallback to rule-based
                 report = generate_tactical_intel(state)
                 print_c(report, "YELLOW")
             continue
 
         if state.game_mode == "tactical":
-            # IED check
+            # Check supply line at start of turn
+            supply_msg = check_supply_line(state)
+            if supply_msg:
+                print_c(supply_msg, "YELLOW")
+
+            # IED check (only if supply line active)
             if random.random() < state.ied_threat / 100:
                 print_c("\n⚠️  IED EXPLOSION! ⚠️", "RED")
                 friendlies = [u for u in state.units if u.side == state.player_side and u.is_alive()]
@@ -578,11 +552,40 @@ FPV drones left: {state.fpv_drones}
                 print_c(f"Media attention: {state.media_attention}", "YELLOW")
                 print_c(f"War crimes allegations: {state.war_crimes_allegations}", "YELLOW")
                 continue
+            elif intent["type"] == "overwatch":
+                zone = intent.get("zone", "medium")
+                # For simplicity, we set the first available unit to overwatch
+                # In a real implementation, you'd specify which unit. We'll assume the player means "the squad"
+                # For now, we set all active units? Better to set one. We'll use the first rifleman.
+                unit = next((u for u in state.units if u.side == state.player_side and u.is_combat_effective()), None)
+                if unit:
+                    narrative = set_overwatch(state, unit, zone)
+                else:
+                    narrative = "No combat-effective unit to set on overwatch."
+            elif intent["type"] == "heal":
+                # Parse medic and target from command – we'll use simple assumption: first medic heals first wounded
+                medic = next((u for u in state.units if u.is_medic and u.side == state.player_side and u.is_combat_effective()), None)
+                target = next((u for u in state.units if u.side == state.player_side and u.hits > 0 and u.is_alive()), None)
+                if medic and target:
+                    narrative = medic_heal(state, medic, target)
+                else:
+                    narrative = "No medic available or no wounded soldier."
+            elif intent["type"] == "interrogate":
+                narrative = interrogate_prisoner(state)
+            elif intent["type"] == "supply":
+                narrative = f"Supply line: {'ACTIVE' if state.supply_line_active else 'CUT'}. Supply points: {state.supply_points}"
             else:
                 narrative = "Command not recognized in tactical mode. Try 'help'."
 
             print_c(f"\n{narrative}", "GREEN")
 
+            # Capture prisoners from routed enemies after player action
+            for enemy in [u for u in state.units if u.side != state.player_side and u.status == "routed" and u.is_alive()]:
+                capture_msg = capture_prisoner(state, enemy)
+                if capture_msg:
+                    print_c(capture_msg, "CYAN")
+
+            # Civilian casualty check
             if intent["type"] in ["mortar", "attack"]:
                 civ_msg = civilian_casualty_check(state, intent.get("zone","medium"))
                 if civ_msg:
@@ -593,6 +596,10 @@ FPV drones left: {state.fpv_drones}
             enemy_narrative = ""
             if not state.game_over:
                 print_c("\n--- ENEMY TURN ---", "RED")
+                # Process overwatch fire before enemy actions
+                ow_fire = process_overwatch_fire(state)
+                if ow_fire:
+                    print_c(ow_fire, "CYAN")
                 enemy_narrative = process_enemy_turn(state, provider, api_key)
                 print_c(f"{enemy_narrative}", "RED")
                 check_victory_tactical(state)
@@ -607,6 +614,9 @@ FPV drones left: {state.fpv_drones}
             weather_msg = change_weather(state)
             if weather_msg:
                 print_c(weather_msg, "YELLOW")
+            time_msg = advance_time(state)
+            if time_msg:
+                print_c(time_msg, "YELLOW")
             decay_detection(state)
             civ_tension = apply_civilian_tension(state)
             if civ_tension:

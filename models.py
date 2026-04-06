@@ -1,5 +1,4 @@
 # models.py
-
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -21,13 +20,18 @@ class Unit:
     is_leader: bool = False
     exp: int = 0
     kills: int = 0
+    # New fields
+    overwatch: bool = False
+    overwatch_zone: str = ""
+    is_medic: bool = False
+    elevation: int = 0               # 0=low, 1=medium, 2=high (per-unit elevation, overrides zone elevation)
+    prisoner: bool = False           # captured enemy
 
     def is_alive(self) -> bool:
         return self.status not in ["kia", "routed"]
 
     def is_combat_effective(self) -> bool:
         return self.is_alive() and self.status != "suppressed" and self.ammo > 0
-
 
 @dataclass
 class StrategicAsset:
@@ -43,12 +47,10 @@ class StrategicAsset:
     anti_ship_missiles: int = 0
     cyber_warfare: int = 0
     space_assets: int = 0
-    # Targetable asset categories
     missile_silos: int = 0
     infrastructure: int = 0
     command_centers: int = 0
     nuclear_sites: int = 0
-
 
 @dataclass
 class GameState:
@@ -59,9 +61,10 @@ class GameState:
     winner: str = ""
     history: List[str] = field(default_factory=list)
     last_narrative: str = ""
-    player_side: str = "attacker"   # attacker or defender
+
     # Tactical fields
     weather: str = "clear"
+    time_of_day: str = "day"           # day, dusk, night, dawn
     objective_zone: str = "medium"
     mortar_rounds: int = 0
     fpv_drones: int = 0
@@ -69,11 +72,11 @@ class GameState:
     units: List[Unit] = field(default_factory=list)
     terrain_description: str = ""
     detected_zones: List[str] = field(default_factory=list)
-    detected_timer: dict = field(default_factory=dict)  # zone -> turn last detected
     obstacles: List[str] = field(default_factory=list)
     player_faction: str = ""
     enemy_faction: str = ""
     building_damage: int = 0
+    elevation_map: dict = field(default_factory=dict)   # zone -> elevation level (0-2)
 
     # Tactical intelligence
     enemy_posture: str = "unknown"
@@ -89,17 +92,13 @@ class GameState:
     global_tension: int = 0
     enemy_war_economy: int = 50
 
-    # Strategic intelligence (descriptive strings shown in intel report)
+    # Strategic intelligence
     threat_matrix: str = ""
     economic_impact: str = ""
+    diplomatic_pressure: str = ""
     enemy_doctrine: str = ""
     escalation_risk: str = ""
     force_effectiveness: str = ""
-
-    # FIX: diplomatic_pressure was `str = ""` (always falsy) so sanctions
-    # always returned "Diplomatic climate not suitable." Changed to bool = True
-    # so sanctions work by default, and can be set False by scenario modifiers.
-    diplomatic_pressure: bool = True
 
     # Logistics and war economy
     supply_points: int = 100
@@ -127,12 +126,15 @@ class GameState:
     cyber_defense: int = 0
     space_satellites: int = 0
     space_attack: int = 0
-
-    # FIX: influence_ops kept as int = 0 (was already correct in source)
-    # strategic_psyops checks this before allowing psyops action
     influence_ops: int = 0
 
     # Asymmetric warfare
     guerrilla_presence: int = 0
     human_terrain: str = ""
 
+    # New: supply line status
+    supply_line_active: bool = True
+    supply_route_zone: str = "extreme"    # zone where supplies enter
+
+    # New: prisoners
+    prisoners: List[Unit] = field(default_factory=list)

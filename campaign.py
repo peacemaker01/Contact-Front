@@ -9,13 +9,12 @@ def print_c(text, color="RESET"):
 CAMPAIGN_FILE = "campaign.json"
 
 def save_campaign(state):
-    """Save attacker units' experience and kills."""
     data = {
         "player_faction": state.player_faction,
         "units": []
     }
     for u in state.units:
-        if u.side == "attacker":
+        if u.side == state.player_side:
             data["units"].append({
                 "name": u.name,
                 "type": u.type,
@@ -26,19 +25,17 @@ def save_campaign(state):
         json.dump(data, f, indent=2)
 
 def load_campaign():
-    """Load campaign data if exists."""
     if not os.path.exists(CAMPAIGN_FILE):
         return None
     with open(CAMPAIGN_FILE, "r") as f:
         return json.load(f)
 
 def apply_campaign_bonus(state):
-    """Boost new units based on campaign progress."""
     camp = load_campaign()
     if not camp:
         return
     for unit in state.units:
-        if unit.side == "attacker":
+        if unit.side == state.player_side:
             for old in camp["units"]:
                 if old["name"] == unit.name:
                     unit.exp = old.get("exp", 0)

@@ -28,6 +28,18 @@ COVER_VALUES = {
 DIFFICULTY = {
     "easy": {"enemy_accuracy": 0.7, "enemy_morale_penalty": 20, "strategic_aggression": 0.2},
     "normal": {"enemy_accuracy": 1.0, "enemy_morale_penalty": 0, "strategic_aggression": 0.4},
-    "hard": {"enemy_accuracy": 1.3, "enemy_morale_penalty": -20, "strategic_aggression": 0.6},
-    "realistic": {"enemy_accuracy": 1.0, "enemy_morale_penalty": -30, "strategic_aggression": 0.8}
+    "hard": {"enemy_accuracy": 1.2, "enemy_morale_penalty": -20, "strategic_aggression": 0.6},
+    "realistic": {"enemy_accuracy": 1.1, "enemy_morale_penalty": -30, "strategic_aggression": 0.8}
+}
+
+# Elevation bonuses
+ELEVATION_BONUS = {0: 0.0, 1: 0.1, 2: 0.2}
+ELEVATION_PENALTY = {0: 0.0, 1: -0.1, 2: -0.2}
+
+# Day/night visibility modifiers
+DAY_NIGHT_VISIBILITY = {
+    "day": 1.0,
+    "dusk": 0.7,
+    "dawn": 0.7,
+    "night": 0.4
 }

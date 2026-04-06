@@ -1,24 +1,19 @@
-# enemy_ai.py - LLM-driven tactical AI
+# enemy_ai.py
 import random
 import re
 import json
 import requests
 from config import ZONE_MAP, DIFFICULTY
-from rules import resolve_infantry_fire, resolve_rpg_attack, resolve_sniper_attack, area_suppression, morale_cascade
+from rules import resolve_infantry_fire, resolve_rpg_attack, resolve_sniper_attack, area_suppression, morale_cascade, check_supply_line
 
 def llm_enemy_decision(state, defender, api_key, provider="openrouter"):
-    """Ask LLM for full tactical decision: action, target zone, etc."""
     if not api_key:
         return None
-
-    # Build rich context
     detected = list(state.detected_zones)
     attacker_zones = list(set(u.zone for u in state.units if u.side == state.player_side and u.is_alive()))
     avg_enemy_morale = sum(u.morale for u in state.units if u.side != state.player_side and u.is_alive()) / max(1, len([u for u in state.units if u.side != state.player_side and u.is_alive()]))
     special = getattr(defender, "special_equipment", [])
     special_str = ", ".join(special) if special else "none"
-
-    # Add nearby enemies and allies for more context
     same_zone_allies = [u.name for u in state.units if u.side == defender.side and u.zone == defender.zone and u.is_alive() and u.id != defender.id]
     same_zone_enemies = [u.name for u in state.units if u.side == state.player_side and u.zone == defender.zone and u.is_alive()]
 
@@ -35,21 +30,16 @@ def llm_enemy_decision(state, defender, api_key, provider="openrouter"):
 
 **Battlefield**:
 - Weather: {state.weather}
+- Time of day: {state.time_of_day}
 - Objective zone: {state.objective_zone}
 - Detected enemy zones: {detected if detected else 'none'}
 - Known enemy positions (if recon active): {attacker_zones if state.recon_active > 0 else 'unknown'}
 - Average enemy morale: {avg_enemy_morale:.0f}
 - Same zone allies: {same_zone_allies if same_zone_allies else 'none'}
 - Same zone enemies: {same_zone_enemies if same_zone_enemies else 'none'}
+- Supply line: {'active' if state.supply_line_active else 'cut'}
 
-**Available actions**:
-- "fire" (shoot at a target zone) – must be in detected zones.
-- "move" (change zone to close/medium/long/extreme) – cannot if suppressed.
-- "hide" (take cover, become suppressed voluntarily).
-- "retreat" (move one zone away from objective).
-- "rpg" (if has RPG) – high damage, less accurate.
-- "sniper" (if has sniper) – high accuracy, high damage.
-
+Available actions: "fire", "move", "hide", "retreat", "rpg", "sniper"
 Return ONLY valid JSON:
 {{
     "action": "fire|move|hide|retreat|rpg|sniper",
@@ -92,6 +82,12 @@ def apply_guerrilla_tactics(state):
     return None
 
 def process_enemy_turn(state, provider="openrouter", api_key=None):
+    # Check supply line (enemy may be affected)
+    supply_msg = check_supply_line(state)
+    if supply_msg and "cut" in supply_msg:
+        # Enemy supply line cut – they may suffer penalties? For now, just note.
+        pass
+
     guerrilla_note = apply_guerrilla_tactics(state)
 
     defenders = [u for u in state.units if u.side != state.player_side and u.is_combat_effective()]
@@ -108,7 +104,6 @@ def process_enemy_turn(state, provider="openrouter", api_key=None):
         if not defender.is_combat_effective():
             continue
 
-        # Low morale – force retreat (override LLM)
         if defender.morale < 20:
             zones = ["close", "medium", "long", "extreme"]
             idx = zones.index(defender.zone)
@@ -120,7 +115,6 @@ def process_enemy_turn(state, provider="openrouter", api_key=None):
                 narratives.append(f"{defender.name} throws down his weapon and flees.")
             continue
 
-        # Try LLM decision
         decision = None
         if api_key:
             decision = llm_enemy_decision(state, defender, api_key, provider)
@@ -128,7 +122,6 @@ def process_enemy_turn(state, provider="openrouter", api_key=None):
         if decision:
             action = decision.get("action")
             target_zone = decision.get("target_zone")
-            # Validate action
             if action == "fire":
                 if target_zone and target_zone in valid_zones:
                     result = resolve_infantry_fire(state, defender.side, target_zone)
@@ -144,7 +137,6 @@ def process_enemy_turn(state, provider="openrouter", api_key=None):
                     defender.zone = target_zone
                     narratives.append(f"{defender.name} moves to {target_zone.upper()}.")
                 else:
-                    # move toward objective (closer zone)
                     zones = ["close", "medium", "long", "extreme"]
                     current = zones.index(defender.zone)
                     target = zones[min(current+1, 3)] if defender.zone != state.objective_zone else zones[max(current-1,0)]
@@ -177,14 +169,13 @@ def process_enemy_turn(state, provider="openrouter", api_key=None):
                 else:
                     narratives.append(f"{defender.name} has no target for sniper.")
             else:
-                # fallback
                 if valid_zones:
                     result = resolve_infantry_fire(state, defender.side, random.choice(list(valid_zones)))
                     narratives.append(result)
                 else:
                     narratives.append(f"{defender.name} holds position.")
         else:
-            # No LLM – simple rule-based fallback
+            # Fallback rule-based
             if valid_zones:
                 target_zone = random.choice(list(valid_zones))
                 if "rpg" in getattr(defender, "special_equipment", []) and random.random() < 0.3:
@@ -205,4 +196,4 @@ def process_enemy_turn(state, provider="openrouter", api_key=None):
 
     return " ".join(narratives)
 
-# Keep strategic AI unchanged for now – we'll move to separate file
+# Strategic enemy turn is in llm_strategic.py (kept separate)
