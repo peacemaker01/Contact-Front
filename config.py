@@ -1,45 +1,36 @@
-# config.py
-COLORS = {
-    "HEADER": "\033[95m",
-    "BLUE": "\033[94m",
-    "CYAN": "\033[96m",
-    "GREEN": "\033[92m",
-    "WARNING": "\033[93m",
-    "FAIL": "\033[91m",
-    "RESET": "\033[0m",
-    "BOLD": "\033[1m",
-    "YELLOW": "\033[33m",
-    "RED": "\033[31m",
-    "DIM": "\033[2m"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Read from .env
+api_key = os.environ.get("LLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
+provider = os.environ.get("LLM_PROVIDER", "openrouter").lower()
+
+# Configure OpenRouter (default)
+OPENROUTER_CONFIG = {
+    "base_url": "https://openrouter.ai/api/v1/chat/completions",
+    "api_key": api_key if provider == "openrouter" else None,
+    "model": "mistralai/mixtral-8x7b-instruct",
+    "fallback_model": "meta-llama/llama-3-8b-instruct",
+    "headers": {
+        "HTTP-Referer": "https://contact-front.local",
+        "X-Title": "Contact Front Wargame"
+    },
+    "temperature": 0.4,
+    "max_tokens": 800,
+    "timeout": 15
 }
 
-ZONES = ["close", "medium", "long", "extreme"]
-ZONE_MAP = {z: i for i, z in enumerate(ZONES)}
+# If using DeepSeek, override config (optional)
+if provider == "deepseek" and api_key:
+    OPENROUTER_CONFIG["base_url"] = "https://api.deepseek.com/v1/chat/completions"
+    OPENROUTER_CONFIG["model"] = "deepseek-chat"
+    OPENROUTER_CONFIG["headers"] = {}
 
-HIT_CHANCE = {0: 0.75, 1: 0.50, 2: 0.25, 3: 0.10}
+# If using Claude (OpenRouter still works, but we can set specific model)
+if provider == "claude" and api_key:
+    OPENROUTER_CONFIG["model"] = "anthropic/claude-3-haiku-20240307"
 
-COVER_VALUES = {
-    "close": 0.2,
-    "medium": 0.1,
-    "long": 0.05,
-    "extreme": 0.0
-}
-
-DIFFICULTY = {
-    "easy": {"enemy_accuracy": 0.7, "enemy_morale_penalty": 20, "strategic_aggression": 0.2},
-    "normal": {"enemy_accuracy": 1.0, "enemy_morale_penalty": 0, "strategic_aggression": 0.4},
-    "hard": {"enemy_accuracy": 1.2, "enemy_morale_penalty": -20, "strategic_aggression": 0.6},
-    "realistic": {"enemy_accuracy": 1.1, "enemy_morale_penalty": -30, "strategic_aggression": 0.8}
-}
-
-# Elevation bonuses
-ELEVATION_BONUS = {0: 0.0, 1: 0.1, 2: 0.2}
-ELEVATION_PENALTY = {0: 0.0, 1: -0.1, 2: -0.2}
-
-# Day/night visibility modifiers
-DAY_NIGHT_VISIBILITY = {
-    "day": 1.0,
-    "dusk": 0.7,
-    "dawn": 0.7,
-    "night": 0.4
-}
+GAME_NAME = "CONTACT FRONT"
+VERSION = "1.0"
