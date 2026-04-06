@@ -24,28 +24,43 @@ def terrain_to_zone(word: str) -> str:
 
 def local_parse(command: str) -> dict:
     cmd = command.lower().strip()
-    # Reject compound commands
-    if re.search(r'\b(and|then|&|,)\b', cmd) and not re.search(r'\b(mortar|drone|advance|fire|attack|recon|surrender|fpv|missile|nuke|warship|intel|ew|cyber|space|psyops|resupply|produce|sanction|clear ieds|targets|roe)\b.*\b(and|then)\b', cmd):
-        return {"type": "compound", "reason": "Please issue one action at a time.", "parser": "local"}
+
+    # Specific info questions (must come first)
+    if re.search(r'\b(what does the drone see|what does drone see|drone view|drone feed)\b', cmd):
+        return {"type": "info", "parser": "local"}
+
     # Surrender
     if re.search(r'\b(surrender|give up|lay down arms|cease fire)\b', cmd):
         return {"type": "surrender", "parser": "local"}
+
     # Recon by fire
     if re.search(r'\brecon by fire\b', cmd):
         return {"type": "attack", "zone": "medium", "parser": "local"}
-    # Info / question
-    if re.search(r'\b(what|show|tell|see|status|where|how many)\b', cmd) and not re.search(r'\b(mortar|drone|advance|fire|attack|recon|surrender|fpv|missile|nuke|warship|intel|ew|cyber|space|psyops|resupply|produce|sanction|clear ieds|sigint|jamming|targets)\b', cmd):
+
+    # General info / question (no turn consumption)
+    if re.search(r'\b(what|show|tell|see|status|where|how many)\b', cmd) and not re.search(r'\b(mortar|advance|fire|attack|recon|surrender|fpv|missile|nuke|warship|intel|ew|cyber|space|psyops|resupply|produce|sanction|clear ieds|sigint|jamming|targets|roe|advise)\b', cmd):
         return {"type": "info", "parser": "local"}
+
+    # Advisor command
+    if re.search(r'\b(advise|suggest|what should i do|recommend)\b', cmd):
+        return {"type": "advise", "parser": "local"}
+
+    # Intel command
+    if re.search(r'\b(intel|intelligence|enemy status|what are the enemy doing)\b', cmd):
+        return {"type": "intel", "parser": "local"}
+
     # Recon drone
     if re.search(r'\b(recon|scan|spot|launch drone|recon drone|eye in the sky)\b', cmd):
         return {"type": "recon", "parser": "local"}
-    # FPV drone
+
+    # FPV drone (but not if it's a question)
     if re.search(r'\b(fp?v?|drone|kamikaze|suicide drone|strike)\b', cmd) and not re.search(r'\b(recon|mortar)\b', cmd):
         target_match = re.search(r'(?:drone|fpv|strike|kill|after)\s+(.+?)(?:\.|$| and | then )', cmd)
         target = target_match.group(1).strip() if target_match else None
         if target and target in ["close", "medium", "long", "extreme"]:
             target = None
         return {"type": "fpv", "target": target, "parser": "local"}
+
     # Mortar
     if re.search(r'\b(mortar|motar|mortor|shell|bombard|artillery|rounds?)\b', cmd):
         zone = "medium"
@@ -60,6 +75,7 @@ def local_parse(command: str) -> dict:
         qty_match = re.search(r'(\d+)\s*(?:round|shell|mortar)', cmd)
         qty = int(qty_match.group(1)) if qty_match else 1
         return {"type": "mortar", "zone": zone, "quantity": qty, "parser": "local"}
+
     # Advance
     if re.search(r'\b(advance|move|push|go to|approach|close in)\b', cmd):
         zone = "medium"
@@ -72,6 +88,7 @@ def local_parse(command: str) -> dict:
                 zone = terrain_to_zone(word)
                 break
         return {"type": "advance", "zone": zone, "parser": "local"}
+
     # Attack / suppress
     if re.search(r'\b(fire|shoot|attack|engage|suppress|light up|open fire)\b', cmd):
         zone = "medium"
@@ -162,7 +179,7 @@ def llm_parse(command: str, provider: str, api_key: str) -> dict:
         return local_parse(command)
     config = PROVIDERS.get(provider, PROVIDERS["openrouter"])
     system_prompt = """You are a military tactics interpreter. Convert the player's command into JSON.
-Possible types: "mortar", "fpv", "recon", "advance", "attack", "surrender", "info", "targets",
+Possible types: "mortar", "fpv", "recon", "advance", "attack", "surrender", "info", "advise", "intel", "targets",
 "missile", "naval", "intel", "ew", "nuke", "loitering", "cyber", "space", "psyops", "resupply", "produce", "sanction", "clear_ieds", "roe", "compound", "unknown".
 For mortar: include "zone" and "quantity".
 For fpv: include "target".
@@ -194,15 +211,13 @@ Output ONLY valid JSON."""
     return local_parse(command)
 
 def validate_intent(intent: dict) -> tuple[bool, str]:
-    """Validate intent structure and required fields."""
     if not isinstance(intent, dict):
         return False, "Intent is not a dictionary."
     if "type" not in intent:
         return False, "Intent missing 'type' field."
     itype = intent["type"]
-    if itype in ["compound", "info", "targets", "roe", "unknown"]:
-        return True, ""  # no further validation needed
-    # Tactical actions
+    if itype in ["compound", "info", "advise", "intel", "targets", "roe", "unknown"]:
+        return True, ""
     if itype in ["mortar", "advance", "attack"]:
         if "zone" not in intent:
             return False, f"{itype} intent missing 'zone'."
@@ -214,18 +229,11 @@ def validate_intent(intent: dict) -> tuple[bool, str]:
     if itype == "fpv":
         if "target" not in intent:
             return False, "FPV intent missing 'target'."
-    if itype == "recon":
-        pass  # no extra fields
-    if itype == "surrender":
-        pass
-    # Strategic actions
     if itype == "missile":
         if "missile_type" not in intent or intent["missile_type"] not in ["ballistic", "cruise", "hypersonic", "anti_ship"]:
             return False, "Missile intent missing valid 'missile_type'."
         if "target_asset" not in intent:
             return False, "Missile intent missing 'target_asset'."
-    if itype in ["naval", "intel", "ew", "cyber", "space", "psyops", "resupply", "produce", "sanction", "clear_ieds", "nuke"]:
-        pass  # no extra fields needed
     return True, ""
 
 def get_gm_narration(event_summary: str, state, provider: str, api_key: str) -> str:
@@ -262,6 +270,45 @@ Return ONLY the sentence, no quotes."""
     except:
         pass
     return "The battle continues."
+
+def generate_llm_intel(state, api_key, provider="openrouter"):
+    """Generate a rich intelligence report using LLM."""
+    if not api_key:
+        return None
+    enemies = [u for u in state.units if u.side != state.player_side and u.is_alive()]
+    if not enemies:
+        return "No enemy forces detected."
+    enemy_list = "\n".join([f"- {u.name} (morale {u.morale}, {u.zone} zone, status {u.status})" for u in enemies])
+    player_zone = "unknown"
+    for u in state.units:
+        if u.side == state.player_side and u.is_alive():
+            player_zone = u.zone
+            break
+    prompt = f"""You are a tactical intelligence analyst. Based on the following data, write a short, vivid paragraph (2-3 sentences) describing the enemy's current situation, posture, likely intentions, and any notable behavior (e.g., RPG gunner aiming, panicked units fleeing).
+
+Player position: {player_zone}
+Weather: {state.weather}
+Objective zone: {state.objective_zone}
+Recon active: {state.recon_active > 0}
+Enemy units:
+{enemy_list}
+
+Write in present tense, military jargon allowed, no markdown."""
+    try:
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+            "max_tokens": 150
+        }
+        resp = requests.post(url, json=payload, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            return resp.json()["choices"][0]["message"]["content"].strip()
+    except:
+        pass
+    return None
 
 def parse_player_intent(command: str, provider: str, api_key: str) -> dict:
     return llm_parse(command, provider, api_key)

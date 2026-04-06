@@ -1,0 +1,41 @@
+{
+  "player_faction": "IRAN",
+  "units": [
+    {
+      "name": "Sargom Reza",
+      "type": "rifleman",
+      "exp": 0,
+      "kills": 0
+    },
+    {
+      "name": "Goruhban Ali",
+      "type": "rifleman",
+      "exp": 0,
+      "kills": 0
+    },
+    {
+      "name": "Sarbaz Mohammad",
+      "type": "rifleman",
+      "exp": 0,
+      "kills": 0
+    },
+    {
+      "name": "Sarhang Hossein",
+      "type": "rifleman",
+      "exp": 0,
+      "kills": 0
+    },
+    {
+      "name": "Tahmasebi Saeed",
+      "type": "lmg",
+      "exp": 0,
+      "kills": 0
+    },
+    {
+      "name": "Sargom Mehdi",
+      "type": "lmg",
+      "exp": 0,
+      "kills": 0
+    }
+  ]
+}

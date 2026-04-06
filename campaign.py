@@ -1,7 +1,10 @@
 # campaign.py
 import json
 import os
-from models import GameState
+from config import COLORS
+
+def print_c(text, color="RESET"):
+    print(f"{COLORS.get(color, COLORS['RESET'])}{text}{COLORS['RESET']}")
 
 CAMPAIGN_FILE = "campaign.json"
 
@@ -46,8 +49,3 @@ def apply_campaign_bonus(state):
                         unit.is_leader = True
                     break
     print_c("Campaign bonuses applied! Veteran units have higher morale.", "GREEN")
-
-# Helper to import print_c (will be passed from main)
-def set_print_function(func):
-    global print_c
-    print_c = func

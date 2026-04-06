@@ -1,4 +1,5 @@
 # models.py
+
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -27,6 +28,7 @@ class Unit:
     def is_combat_effective(self) -> bool:
         return self.is_alive() and self.status != "suppressed" and self.ammo > 0
 
+
 @dataclass
 class StrategicAsset:
     nukes: int = 0
@@ -41,11 +43,12 @@ class StrategicAsset:
     anti_ship_missiles: int = 0
     cyber_warfare: int = 0
     space_assets: int = 0
-    # New targetable asset categories
+    # Targetable asset categories
     missile_silos: int = 0
     infrastructure: int = 0
     command_centers: int = 0
     nuclear_sites: int = 0
+
 
 @dataclass
 class GameState:
@@ -56,7 +59,7 @@ class GameState:
     winner: str = ""
     history: List[str] = field(default_factory=list)
     last_narrative: str = ""
-
+    player_side: str = "attacker"   # attacker or defender
     # Tactical fields
     weather: str = "clear"
     objective_zone: str = "medium"
@@ -66,6 +69,7 @@ class GameState:
     units: List[Unit] = field(default_factory=list)
     terrain_description: str = ""
     detected_zones: List[str] = field(default_factory=list)
+    detected_timer: dict = field(default_factory=dict)  # zone -> turn last detected
     obstacles: List[str] = field(default_factory=list)
     player_faction: str = ""
     enemy_faction: str = ""
@@ -83,15 +87,19 @@ class GameState:
     strategic_scenario: str = ""
     civilian_casualties: int = 0
     global_tension: int = 0
-    enemy_war_economy: int = 50   # New
+    enemy_war_economy: int = 50
 
-    # Strategic intelligence
+    # Strategic intelligence (descriptive strings shown in intel report)
     threat_matrix: str = ""
     economic_impact: str = ""
-    diplomatic_pressure: str = ""
     enemy_doctrine: str = ""
     escalation_risk: str = ""
     force_effectiveness: str = ""
+
+    # FIX: diplomatic_pressure was `str = ""` (always falsy) so sanctions
+    # always returned "Diplomatic climate not suitable." Changed to bool = True
+    # so sanctions work by default, and can be set False by scenario modifiers.
+    diplomatic_pressure: bool = True
 
     # Logistics and war economy
     supply_points: int = 100
@@ -119,8 +127,12 @@ class GameState:
     cyber_defense: int = 0
     space_satellites: int = 0
     space_attack: int = 0
+
+    # FIX: influence_ops kept as int = 0 (was already correct in source)
+    # strategic_psyops checks this before allowing psyops action
     influence_ops: int = 0
 
     # Asymmetric warfare
     guerrilla_presence: int = 0
     human_terrain: str = ""
+

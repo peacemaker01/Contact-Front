@@ -1,4 +1,4 @@
-# main.py - Contact Front (Complete with all fixes)
+# main.py - Contact Front (Complete with enhanced intel command)
 import os
 import time
 import random
@@ -6,11 +6,11 @@ from config import COLORS, ZONE_MAP, COVER_VALUES, DIFFICULTY
 from models import GameState, StrategicAsset
 from scenarios import generate_mission, generate_strategic_scenario
 from save_manager import save_game, load_game, list_saves
-from llm_client import parse_player_intent, generate_narrative, validate_intent
+from llm_client import parse_player_intent, generate_narrative, validate_intent, generate_llm_intel
 from rules import (
     resolve_mortar, resolve_fpv_drone, resolve_infantry_fire,
-    resolve_advance, resolve_surrender, resolve_recon, check_victory,
-    area_suppression, morale_cascade, apply_command_delay,
+    resolve_advance, resolve_surrender, resolve_recon,
+    check_victory_tactical, apply_command_delay,
     recover_suppression, apply_leader_boost, tactical_resupply,
     change_weather, civilian_casualty_check, decay_detection,
     refresh_detection, apply_civilian_tension,
@@ -20,7 +20,8 @@ from rules import (
     strategic_resupply, strategic_produce_missiles,
     strategic_sanctions, strategic_nuclear_strike
 )
-from enemy_ai import process_enemy_turn, process_strategic_enemy_turn, apply_guerrilla_tactics
+from enemy_ai import process_enemy_turn
+from llm_strategic import process_strategic_enemy_turn
 from factions import FACTIONS, get_faction_banner, get_faction_color
 from campaign import save_campaign, load_campaign, apply_campaign_bonus
 
@@ -49,7 +50,7 @@ def draw_tactical_map(state):
         cover_str = f"{cover:3.0f}%"
         friend_icons = []
         for u in state.units:
-            if u.side == "attacker" and u.zone == zone and u.is_alive():
+            if u.side == state.player_side and u.zone == zone and u.is_alive():
                 icon = "⚔️" if u.type == "lmg" else "🔫"
                 if u.is_leader:
                     icon = "⭐" + icon
@@ -57,11 +58,11 @@ def draw_tactical_map(state):
         enemy_icons = []
         if state.recon_active > 0:
             for u in state.units:
-                if u.side == "defender" and u.zone == zone and u.is_alive():
+                if u.side != state.player_side and u.zone == zone and u.is_alive():
                     icon = "⚡" if u.type == "lmg" else "🔫"
                     enemy_icons.append(icon)
         else:
-            if any(u.side == "defender" and u.zone == zone for u in state.units):
+            if any(u.side != state.player_side and u.zone == zone for u in state.units):
                 enemy_icons = ["?"]
         friendly_str = " ".join(friend_icons) if friend_icons else "-"
         enemy_str = " ".join(enemy_icons) if enemy_icons else "-"
@@ -99,14 +100,14 @@ def show_aar(state):
     print_c("\n" + "═"*65, "HEADER")
     print_c("                AFTER-ACTION REPORT", "BOLD")
     print_c("═"*65, "HEADER")
-    attacker_losses = len([u for u in state.units if u.side == "attacker" and u.status == "kia"])
-    defender_losses = len([u for u in state.units if u.side == "defender" and u.status == "kia"])
-    total_shots = sum(30 - u.ammo for u in state.units if u.side == "attacker" and u.type == "rifleman")
-    print_c(f" Friendly KIA: {attacker_losses}", "RED")
-    print_c(f" Enemy KIA:    {defender_losses}", "GREEN")
+    player_losses = len([u for u in state.units if u.side == state.player_side and u.status == "kia"])
+    enemy_losses = len([u for u in state.units if u.side != state.player_side and u.status == "kia"])
+    total_shots = sum(30 - u.ammo for u in state.units if u.side == state.player_side and u.type == "rifleman")
+    print_c(f" Friendly KIA: {player_losses}", "RED")
+    print_c(f" Enemy KIA:    {enemy_losses}", "GREEN")
     print_c(f" Rounds fired: {total_shots}", "CYAN")
     print_c(f" Turns played: {state.turn-1}", "CYAN")
-    print_c(f" Final objective status: {'SECURED' if state.winner == 'attacker' else 'LOST'}", "YELLOW")
+    print_c(f" Final objective status: {'SECURED' if state.winner == state.player_side else 'LOST'}", "YELLOW")
     lessons = [
         "Use recon before advancing.",
         "Mortars are most effective against suppressed targets.",
@@ -128,6 +129,8 @@ def show_help():
     print_c('  "demand surrender"', "GREEN")
     print_c('  "resupply"', "GREEN")
     print_c('  "roe"', "GREEN")
+    print_c('  "advise" - Get AI tactical recommendation', "GREEN")
+    print_c('  "intel" - Detailed enemy intelligence report', "GREEN")
     print_c('  "what does the drone see?" (info, no turn)', "GREEN")
     print_c("\n=== STRATEGIC COMMANDS ===", "CYAN")
     print_c('  "targets" - List all targetable enemy assets', "GREEN")
@@ -157,11 +160,75 @@ def show_history(state):
         print_c(f"Turn {i+1}: {h}", "YELLOW")
     print_c("")
 
+def generate_tactical_intel(state):
+    """Rule-based detailed intelligence for the intel command."""
+    enemies = [u for u in state.units if u.side != state.player_side and u.is_alive()]
+    if not enemies:
+        return "No enemy forces detected. The battlefield is quiet."
+    # Determine overall posture
+    avg_morale = sum(u.morale for u in enemies) / len(enemies)
+    if avg_morale > 70:
+        posture = "aggressive and confident"
+    elif avg_morale > 40:
+        posture = "defensive but steady"
+    else:
+        posture = "wavering, some showing signs of panic"
+    # Movement direction (based on zone changes)
+    # For simplicity, we'll use the zone with most enemies
+    zone_counts = {}
+    for e in enemies:
+        zone_counts[e.zone] = zone_counts.get(e.zone, 0) + 1
+    main_zone = max(zone_counts, key=zone_counts.get)
+    # Determine likely intent
+    if main_zone == state.objective_zone:
+        if state.player_side == "attacker":
+            intent = "defending the objective"
+        else:
+            intent = "attacking the objective"
+    elif main_zone == "long":
+        intent = "approaching from distance, possibly staging for assault"
+    elif main_zone == "close":
+        intent = "close assault imminent"
+    else:
+        intent = "holding position"
+    # Unit-specific notes
+    special_notes = []
+    for e in enemies:
+        if e.morale < 30:
+            special_notes.append(f"{e.name} is panicking and may rout")
+        elif "rpg" in getattr(e, "special_equipment", []):
+            special_notes.append(f"{e.name} is armed with an RPG – high threat")
+        elif "sniper" in getattr(e, "special_equipment", []):
+            special_notes.append(f"{e.name} is a sniper – deadly at range")
+        if e.status == "suppressed":
+            special_notes.append(f"{e.name} is pinned down, unable to move effectively")
+    report = f"Enemy posture: {posture}. They appear to be {intent} in the {main_zone.upper()} zone."
+    if special_notes:
+        report += " Notable observations: " + "; ".join(special_notes)
+    # Distance estimation
+    player_zone = None
+    for u in state.units:
+        if u.side == state.player_side and u.is_alive():
+            player_zone = u.zone
+            break
+    if player_zone:
+        dist = abs(ZONE_MAP.get(player_zone, 2) - ZONE_MAP.get(main_zone, 2))
+        if dist == 0:
+            report += " Enemy forces are in the same zone – close combat."
+        elif dist == 1:
+            report += " Enemy is in an adjacent zone, within effective small arms range."
+        elif dist == 2:
+            report += " Enemy is at medium distance – mortar and FPV drones are effective."
+        else:
+            report += " Enemy is at extreme distance – only mortars and drones can reach."
+    return report
+
 def display_hud(state):
     print_c(f"\n{'='*65}", "HEADER")
     if state.game_mode == "tactical":
         print_c(f" TURN {state.turn} | OBJ: {state.objective_zone.upper()} | {state.weather.upper()}", "BOLD")
-        print_c(f" MORTARS: {state.mortar_rounds} | FPV: {state.fpv_drones} | RECON: {state.recon_active}t", "CYAN")
+        recon_label = f"{state.recon_active} turn{'s' if state.recon_active != 1 else ''} remaining" if state.recon_active > 0 else "inactive"
+        print_c(f" MORTARS: {state.mortar_rounds} | FPV: {state.fpv_drones} | RECON: {recon_label}", "CYAN")
         print_c(f" SUPPLY: {state.supply_points} | IED THREAT: {state.ied_threat}%", "CYAN")
         if state.building_damage > 0:
             bar = "█" * (state.building_damage // 10) + "░" * (10 - state.building_damage // 10)
@@ -176,7 +243,7 @@ def display_hud(state):
         draw_tactical_map(state)
         print_c(" FRIENDLY:", "GREEN")
         for u in state.units:
-            if u.side == "attacker" and u.is_alive():
+            if u.side == state.player_side and u.is_alive():
                 sc = "GREEN" if u.status == "active" else "WARNING"
                 leader_mark = " [L]" if u.is_leader else ""
                 print_c(f"   [{u.zone.upper():<7}] {u.name}{leader_mark:<15} | {u.status.upper()} | AMMO:{u.ammo}", sc)
@@ -184,7 +251,7 @@ def display_hud(state):
         print_c("\n ENEMY:", "RED")
         if state.recon_active > 0:
             for u in state.units:
-                if u.side == "defender" and u.is_alive():
+                if u.side != state.player_side and u.is_alive():
                     sc = "FAIL" if u.status == "active" else "WARNING"
                     note = " (PANICKING)" if u.morale < 30 else " (SHAKEN)" if u.morale < 50 else ""
                     print_c(f"   [{u.zone.upper():<7}] {u.name:<15} | {u.status.upper()} | MORALE:{u.morale}{note}", sc)
@@ -208,26 +275,26 @@ def display_hud(state):
     print_c(f"{'='*65}\n", "HEADER")
 
 def generate_tactical_intel(state):
-    defenders = [u for u in state.units if u.side == "defender" and u.is_alive()]
-    if not defenders:
+    enemies = [u for u in state.units if u.side != state.player_side and u.is_alive()]
+    if not enemies:
         state.enemy_posture = "none"
         state.enemy_ammo_estimate = "none"
         state.enemy_morale_trend = "none"
         return
-    if any(d.morale > 70 and d.status != "suppressed" for d in defenders):
+    if any(d.morale > 70 and d.status != "suppressed" for d in enemies):
         state.enemy_posture = "aggressive"
-    elif any(d.morale < 30 for d in defenders):
+    elif any(d.morale < 30 for d in enemies):
         state.enemy_posture = "routed"
     else:
         state.enemy_posture = "defensive"
-    avg_ammo = sum(d.ammo for d in defenders) / len(defenders)
+    avg_ammo = sum(d.ammo for d in enemies) / len(enemies)
     if avg_ammo > 20:
         state.enemy_ammo_estimate = "plentiful"
     elif avg_ammo > 10:
         state.enemy_ammo_estimate = "moderate"
     else:
         state.enemy_ammo_estimate = "low"
-    avg_morale = sum(d.morale for d in defenders) / len(defenders)
+    avg_morale = sum(d.morale for d in enemies) / len(enemies)
     if avg_morale > 70:
         state.enemy_morale_trend = "high"
     elif avg_morale > 40:
@@ -263,16 +330,19 @@ def setup_menu():
                     os.environ[key] = value
     except:
         pass
+
     draw_header()
     api_key = os.environ.get("LLM_API_KEY")
     if api_key:
         print_c("  LLM: ENABLED (Natural language with AI)", "GREEN")
     else:
         print_c("  LLM: DISABLED (local parser only)", "WARNING")
+
     print_c("\n[1] TACTICAL MODE (Infantry, mortars, drones)", "CYAN")
     print_c("[2] STRATEGIC MODE (Missiles, warships, nukes)", "CYAN")
     print_c("[3] RESUME MISSION", "CYAN")
     mode_choice = input("\nSelect > ").strip()
+
     if mode_choice == "3":
         saves = list_saves()
         if not saves:
@@ -284,7 +354,7 @@ def setup_menu():
             print(f"  {i+1}. {s}")
         idx = int(input("Select save: ")) - 1
         return load_game(f"saves/{saves[idx]}")
-    
+
     if mode_choice == "2":
         print_c("\nSTRATEGIC SCENARIOS:", "HEADER")
         print("1. Strait of Hormuz (Naval confrontation)")
@@ -293,6 +363,7 @@ def setup_menu():
         sc_choice = input("> ").strip()
         scenario_map = {"1": "Strait of Hormuz", "2": "Missile Exchange", "3": "Nuclear Brinkmanship"}
         scenario = scenario_map.get(sc_choice, "Strait of Hormuz")
+
         factions_list = list(FACTIONS.keys())
         print_c("\nSELECT YOUR FACTION:", "HEADER")
         for i, f in enumerate(factions_list, 1):
@@ -302,6 +373,7 @@ def setup_menu():
             player_faction = factions_list[int(f_choice)-1]
         except:
             player_faction = "USA"
+
         print_c("\nSELECT ENEMY FACTION:", "HEADER")
         for i, f in enumerate(factions_list, 1):
             print_c(f"  {i}. {get_faction_banner(f)}", FACTIONS[f]["color"])
@@ -310,21 +382,27 @@ def setup_menu():
             enemy_faction = factions_list[int(e_choice)-1]
         except:
             enemy_faction = "IRAN"
+
         print_c("\nDIFFICULTY:", "HEADER")
         print("1. Easy  2. Normal  3. Hard  4. Realistic")
         diff_map = {"1": "easy", "2": "normal", "3": "hard", "4": "realistic"}
         diff = diff_map.get(input("> "), "normal")
+
         state = generate_strategic_scenario(scenario, diff, player_faction, enemy_faction)
+        state.player_side = "attacker"
         return state
-    else:
+
+    else:  # tactical mode
         print_c("\n[1] OPERATION: BROKEN ANVIL (Farmhouse assault)", "CYAN")
         print_c("[2] OPERATION: SILENT SWEEP (Night raid)", "CYAN")
         mission_choice = input("Select mission > ").strip()
         mission = "night_raid" if mission_choice == "2" else "broken_anvil"
+
         print_c("\nDIFFICULTY:", "HEADER")
         print("1. Easy  2. Normal  3. Hard  4. Realistic")
         diff_map = {"1": "easy", "2": "normal", "3": "hard", "4": "realistic"}
         diff = diff_map.get(input("> "), "normal")
+
         factions_list = list(FACTIONS.keys())
         print_c("\nSELECT YOUR FACTION:", "HEADER")
         for i, f in enumerate(factions_list, 1):
@@ -334,6 +412,7 @@ def setup_menu():
             player_faction = factions_list[int(f_choice)-1]
         except:
             player_faction = "NATO"
+
         print_c("\nSELECT ENEMY FACTION:", "HEADER")
         for i, f in enumerate(factions_list, 1):
             print_c(f"  {i}. {get_faction_banner(f)}", FACTIONS[f]["color"])
@@ -342,10 +421,12 @@ def setup_menu():
             enemy_faction = factions_list[int(e_choice)-1]
         except:
             enemy_faction = "RUSSIA"
+
         print_c("\nCHOOSE YOUR SIDE:", "HEADER")
         print("1. Attacker  2. Defender")
         side_choice = input("> ").strip()
         player_side = "attacker" if side_choice == "1" else "defender"
+
         provider = os.environ.get("LLM_PROVIDER", "openrouter")
         api_key = os.environ.get("LLM_API_KEY")
         state = generate_mission(mission, diff, provider, api_key, player_faction, enemy_faction, player_side)
@@ -353,8 +434,10 @@ def setup_menu():
 
 def main():
     state = setup_menu()
+
     if state.game_mode == "tactical":
         apply_campaign_bonus(state)
+
     print_c("\n" + "="*65, "CYAN")
     print_c("                     MISSION BRIEF", "BOLD")
     print_c("="*65, "CYAN")
@@ -369,12 +452,15 @@ def main():
     while not state.game_over:
         print_c(f'GM: "{state.last_narrative}"', "YELLOW")
         display_hud(state)
+
         try:
             cmd = input("COMMANDER > ").strip()
         except KeyboardInterrupt:
             break
+
         if not cmd:
             continue
+
         if cmd.lower() == "help":
             show_help()
             continue
@@ -391,23 +477,76 @@ def main():
         intent = parse_player_intent(cmd, provider, api_key)
         print_c(f"\n--- EXECUTING ORDERS ({intent.get('type','UNKNOWN').upper()}) ---", "CYAN")
 
-        # Validate intent
         valid, err = validate_intent(intent)
         if not valid:
             print_c(f"Invalid command: {err}", "WARNING")
+            continue
+
+        if intent["type"] in ["unknown", "compound"]:
+            reason = intent.get("reason", "Command not recognized. Try 'help'.")
+            print_c(reason, "WARNING")
             continue
 
         if intent["type"] == "info":
             print_c("\n(Current battlefield information is shown in the HUD above.)", "CYAN")
             continue
 
+        if intent["type"] == "advise":
+            if not api_key:
+                print_c("Advice requires an LLM API key.", "WARNING")
+            else:
+                print_c("Consulting AI advisor...", "CYAN")
+                prompt = f"""You are a tactical advisor. Based on the following situation, give ONE short sentence of advice (max 20 words).
+
+Objective zone: {state.objective_zone}
+Weather: {state.weather}
+Your units: {len([u for u in state.units if u.side == state.player_side and u.is_alive()])} alive
+Enemy units: {len([u for u in state.units if u.side != state.player_side and u.is_alive()])} alive
+Recon active: {state.recon_active > 0}
+Mortars left: {state.mortar_rounds}
+FPV drones left: {state.fpv_drones}
+"""
+                try:
+                    import requests
+                    response = requests.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                        json={
+                            "model": "openai/gpt-4o-mini",
+                            "messages": [{"role": "user", "content": prompt}],
+                            "max_tokens": 40,
+                            "temperature": 0.7
+                        },
+                        timeout=5
+                    )
+                    if response.status_code == 200:
+                        advice = response.json()["choices"][0]["message"]["content"].strip()
+                        print_c(f"Advisor: \"{advice}\"", "CYAN")
+                    else:
+                        print_c("Advisor unavailable.", "WARNING")
+                except Exception as e:
+                    print_c(f"Advisor error: {e}", "WARNING")
+            continue
+
+        if intent["type"] == "intel":
+            print_c("\n--- INTELLIGENCE REPORT ---", "CYAN")
+            # Try LLM first
+            llm_report = generate_llm_intel(state, api_key, provider)
+            if llm_report:
+                print_c(llm_report, "YELLOW")
+            else:
+                # Fallback to rule-based
+                report = generate_tactical_intel(state)
+                print_c(report, "YELLOW")
+            continue
+
         if state.game_mode == "tactical":
-            # IED ambush
+            # IED check
             if random.random() < state.ied_threat / 100:
-                print_c("\n⚠️ IED EXPLOSION! ⚠️", "RED")
-                attackers = [u for u in state.units if u.side == "attacker" and u.is_alive()]
-                if attackers:
-                    target = random.choice(attackers)
+                print_c("\n⚠️  IED EXPLOSION! ⚠️", "RED")
+                friendlies = [u for u in state.units if u.side == state.player_side and u.is_alive()]
+                if friendlies:
+                    target = random.choice(friendlies)
                     target.hits += 10
                     target.morale -= 30
                     if target.hits >= 15:
@@ -415,7 +554,9 @@ def main():
                         print_c(f"IED kills {target.name}!", "RED")
                     else:
                         print_c(f"IED wounds {target.name}!", "RED")
+                    from rules import morale_cascade
                     morale_cascade(state, target)
+
             narrative = ""
             if intent["type"] == "mortar":
                 narrative = resolve_mortar(state, intent.get("zone","medium"), intent.get("quantity",1))
@@ -426,7 +567,7 @@ def main():
             elif intent["type"] == "advance":
                 narrative = resolve_advance(state, intent.get("zone","medium"))
             elif intent["type"] == "attack":
-                narrative = resolve_infantry_fire(state, "attacker", intent.get("zone","medium"))
+                narrative = resolve_infantry_fire(state, state.player_side, intent.get("zone","medium"))
             elif intent["type"] == "surrender":
                 narrative = resolve_surrender(state)
             elif intent["type"] == "resupply":
@@ -438,22 +579,25 @@ def main():
                 print_c(f"War crimes allegations: {state.war_crimes_allegations}", "YELLOW")
                 continue
             else:
-                narrative = "Command not recognized. Try 'help'."
+                narrative = "Command not recognized in tactical mode. Try 'help'."
 
             print_c(f"\n{narrative}", "GREEN")
-            # Civilian casualty check
+
             if intent["type"] in ["mortar", "attack"]:
                 civ_msg = civilian_casualty_check(state, intent.get("zone","medium"))
                 if civ_msg:
                     print_c(civ_msg, "RED")
-            check_victory(state)
+
+            check_victory_tactical(state)
+
             enemy_narrative = ""
             if not state.game_over:
                 print_c("\n--- ENEMY TURN ---", "RED")
                 enemy_narrative = process_enemy_turn(state, provider, api_key)
                 print_c(f"{enemy_narrative}", "RED")
-                check_victory(state)
-            # Recovery and leader boost
+                check_victory_tactical(state)
+
+            # End-of-turn updates
             rec_msg = recover_suppression(state)
             if rec_msg:
                 print_c(rec_msg, "GREEN")
@@ -463,14 +607,13 @@ def main():
             weather_msg = change_weather(state)
             if weather_msg:
                 print_c(weather_msg, "YELLOW")
-            # Detection decay
             decay_detection(state)
-            # Apply civilian tension
             civ_tension = apply_civilian_tension(state)
             if civ_tension:
                 print_c(civ_tension, "RED")
-            state.supply_points = min(200, state.supply_points + random.randint(1, 3))
+            state.supply_points = min(200, state.supply_points + random.randint(0, 2))
             generate_tactical_intel(state)
+
             combined = f"{narrative} {enemy_narrative}"
             state.last_narrative = generate_narrative(combined, state, provider, api_key)
             state.history.append(f"Turn {state.turn}: {narrative[:80]}")
@@ -478,19 +621,19 @@ def main():
             if state.recon_active > 0:
                 state.recon_active -= 1
             if state.ied_threat > 0:
-                state.ied_threat = max(0, state.ied_threat - random.randint(0, 5))
+                state.ied_threat = max(0, state.ied_threat - random.randint(0, 3))
+
         else:  # strategic mode
-            # Confirmation for nuclear strike
             if intent["type"] == "nuke":
                 print_c("⚠️  NUCLEAR STRIKE AUTHORIZATION REQUIRED ⚠️", "RED")
                 confirm = input("Type 'CONFIRM' to launch nuclear weapon: ").strip()
                 if confirm != "CONFIRM":
                     print_c("Nuclear strike cancelled.", "GREEN")
                     continue
-            # Route to strategic rule functions
+
             narrative = ""
             if intent["type"] == "missile":
-                narrative = strategic_missile_strike(state, intent.get("missile_type", "ballistic"), intent.get("target_asset", "military"))
+                narrative = strategic_missile_strike(state, intent.get("missile_type","ballistic"), intent.get("target_asset","military"))
             elif intent["type"] == "naval":
                 narrative = strategic_naval_engagement(state)
             elif intent["type"] == "loitering":
@@ -512,16 +655,14 @@ def main():
             elif intent["type"] == "intel":
                 gain = random.randint(10, 30)
                 state.strategic.intelligence_level = min(100, state.strategic.intelligence_level + gain)
-                narrative = f"Intelligence gathered. Intel level increased to {state.strategic.intelligence_level}."
-                narrative += "\nTargetable enemy assets:"
-                narrative += f"\n  • Warships: {state.enemy_strategic.warships}"
-                narrative += f"\n  • Air Defense: {state.enemy_strategic.air_defense}"
-                narrative += f"\n  • Missile Silos: {state.enemy_strategic.missile_silos}"
-                narrative += f"\n  • Infrastructure: {state.enemy_strategic.infrastructure}"
-                narrative += f"\n  • Command Centers: {state.enemy_strategic.command_centers}"
-                narrative += f"\n  • Nuclear Sites: {state.enemy_strategic.nuclear_sites}"
+                narrative = f"Intelligence gathered. Intel level increased to {state.strategic.intelligence_level}.\nTargetable enemy assets:\n"
+                narrative += f"  • Warships: {state.enemy_strategic.warships}\n"
+                narrative += f"  • Air Defense: {state.enemy_strategic.air_defense}\n"
+                narrative += f"  • Missile Silos: {state.enemy_strategic.missile_silos}\n"
+                narrative += f"  • Infrastructure: {state.enemy_strategic.infrastructure}\n"
+                narrative += f"  • Command Centers: {state.enemy_strategic.command_centers}\n"
+                narrative += f"  • Nuclear Sites: {state.enemy_strategic.nuclear_sites}"
             elif intent["type"] == "ew":
-                # Electronic warfare with cooldown (keep existing logic)
                 if not hasattr(state, 'last_ew_turn'):
                     state.last_ew_turn = 0
                 current_turn = state.turn
@@ -536,27 +677,28 @@ def main():
                     else:
                         narrative = "No EW assets available."
             elif intent["type"] == "targets":
-                narrative = "Targetable enemy assets:"
-                narrative += f"\n  • Warships: {state.enemy_strategic.warships}"
-                narrative += f"\n  • Air Defense: {state.enemy_strategic.air_defense}"
-                narrative += f"\n  • Missile Silos: {state.enemy_strategic.missile_silos}"
-                narrative += f"\n  • Infrastructure: {state.enemy_strategic.infrastructure}"
-                narrative += f"\n  • Command Centers: {state.enemy_strategic.command_centers}"
-                narrative += f"\n  • Nuclear Sites: {state.enemy_strategic.nuclear_sites}"
+                narrative = "Targetable enemy assets:\n"
+                narrative += f"  • Warships: {state.enemy_strategic.warships}\n"
+                narrative += f"  • Air Defense: {state.enemy_strategic.air_defense}\n"
+                narrative += f"  • Missile Silos: {state.enemy_strategic.missile_silos}\n"
+                narrative += f"  • Infrastructure: {state.enemy_strategic.infrastructure}\n"
+                narrative += f"  • Command Centers: {state.enemy_strategic.command_centers}\n"
+                narrative += f"  • Nuclear Sites: {state.enemy_strategic.nuclear_sites}"
             else:
-                narrative = "Command not recognized in strategic mode."
+                narrative = "Command not recognized in strategic mode. Try 'help'."
 
             print_c(f"\n{narrative}", "GREEN")
-            # Apply civilian tension
+
             civ_tension = apply_civilian_tension(state)
             if civ_tension:
                 print_c(civ_tension, "RED")
+
             if not state.game_over:
                 print_c("\n--- ENEMY STRATEGIC RESPONSE ---", "RED")
-                enemy_narrative = process_strategic_enemy_turn(state)
+                enemy_narrative = process_strategic_enemy_turn(state, provider, api_key)
                 print_c(f"{enemy_narrative}", "RED")
                 check_strategic_victory(state)
-            # War economy update
+
             state.production_points += max(0, 5 + (state.war_economy - 50) // 10 - state.sanctions // 10)
             if state.production_points >= 20:
                 state.strategic.ballistic_missiles += 1
@@ -569,8 +711,7 @@ def main():
         print_c("\n" + "-"*40, "DIM")
         time.sleep(0.5)
 
-    # After game over
-    if state.game_mode == "tactical" and state.winner == "attacker":
+    if state.game_mode == "tactical" and state.winner == state.player_side:
         save_campaign(state)
     show_aar(state)
     print_c("\nThank you for playing CONTACT FRONT.", "GREEN")

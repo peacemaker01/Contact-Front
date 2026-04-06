@@ -5,27 +5,31 @@ from config import ZONE_MAP, HIT_CHANCE, DIFFICULTY, COVER_VALUES
 def roll_dice(sides=6, count=2):
     return sum(random.randint(1, sides) for _ in range(count))
 
+# ---------- Detection helpers ----------
+def refresh_detection(state, zone):
+    """Call when a zone is detected to reset its timer."""
+    if not hasattr(state, 'detected_timer'):
+        state.detected_timer = {}
+    state.detected_timer[zone] = state.turn
+    if zone not in state.detected_zones:
+        state.detected_zones.append(zone)
+
 def add_detection(state, zone):
     zones = ["close", "medium", "long", "extreme"]
     if zone not in zones:
         return
-    if zone not in state.detected_zones:
-        state.detected_zones.append(zone)
+    refresh_detection(state, zone)
     idx = zones.index(zone)
     if idx > 0:
-        adj = zones[idx-1]
-        if adj not in state.detected_zones:
-            state.detected_zones.append(adj)
+        refresh_detection(state, zones[idx - 1])
     if idx < 3:
-        adj = zones[idx+1]
-        if adj not in state.detected_zones:
-            state.detected_zones.append(adj)
+        refresh_detection(state, zones[idx + 1])
 
-# Ammo types and penetration
+# ---------- Ammo types and penetration ----------
 AMMO_TYPES = {
     "ball": {"penetration": 1, "damage_dice": "2d6", "suppression": 15},
-    "ap": {"penetration": 3, "damage_dice": "2d6", "suppression": 10},
-    "he": {"penetration": 0, "damage_dice": "3d6", "suppression": 25}
+    "ap":   {"penetration": 3, "damage_dice": "2d6", "suppression": 10},
+    "he":   {"penetration": 0, "damage_dice": "3d6", "suppression": 25}
 }
 
 def calculate_penetration(cover_thickness, ammo_type, angle=0):
@@ -36,15 +40,15 @@ def calculate_penetration(cover_thickness, ammo_type, angle=0):
 
 def area_suppression(state, zone):
     for unit in state.units:
-        if unit.zone == zone and unit.side != "attacker" and unit.is_alive():
+        if unit.zone == zone and unit.side != state.player_side and unit.is_alive():
             unit.morale -= 10
             if unit.morale < 30:
                 unit.status = "suppressed"
     return "The area is saturated with suppressing fire."
 
 def morale_cascade(state, start_unit):
-    """Fixed: uses visited set to prevent infinite loops."""
-    if start_unit.morale >= 20 or start_unit.status == "routed":
+    """Fixed: uses visited set and ignores dead units."""
+    if start_unit.status in ["kia", "routed"] or start_unit.morale >= 20:
         return None
     queue = [start_unit]
     visited = set()
@@ -54,7 +58,7 @@ def morale_cascade(state, start_unit):
         if u.id in visited:
             continue
         visited.add(u.id)
-        if u.status == "routed":
+        if u.status in ["kia", "routed"]:
             continue
         u.status = "routed"
         messages.append(f"{u.name} panics and routs!")
@@ -64,7 +68,9 @@ def morale_cascade(state, start_unit):
             if 0 <= idx + offset < len(zones):
                 adj_zone = zones[idx + offset]
                 for other in state.units:
-                    if other.side == u.side and other.zone == adj_zone and other.is_alive() and other.id not in visited:
+                    if (other.side == u.side and other.zone == adj_zone
+                            and other.is_alive() and other.id not in visited
+                            and other.status != "routed"):
                         other.morale -= 15
                         if other.morale < 20 and other.status != "routed":
                             queue.append(other)
@@ -87,6 +93,29 @@ def line_of_sight(state, from_zone, to_zone):
     key = f"{from_zone}-{to_zone}"
     return key not in state.obstacles
 
+# Varied message pools
+RICOCHET_MSGS = [
+    "Bullets ricochet off cover. No effect.",
+    "Fire absorbed by terrain. Nothing lands.",
+    "Rounds deflect harmlessly from the structure.",
+    "Cover holds. Enemy stays put.",
+    "Ineffective fire — they're well dug in.",
+    "Shots go wide in the fog. No casualties.",
+    "Enemy hunkers down. Fire suppressed without effect.",
+    "Concrete absorbs the burst. No penetration.",
+    "Near miss. Dust kicks up but no hits.",
+    "The angle is wrong — rounds skip off.",
+]
+
+MISS_MSGS = [
+    "{attacker} misses {target}.",
+    "{attacker}'s burst goes high. {target} unhurt.",
+    "{attacker} fires — {target} drops flat. No hit.",
+    "Rounds from {attacker} kick up dirt near {target}. Clean miss.",
+    "{attacker} squeezes off a burst. {target} is untouched.",
+]
+
+# ---------- Tactical Resolutions ----------
 def resolve_mortar(state, target_zone, rounds=1):
     if state.mortar_rounds < rounds:
         return f"Only {state.mortar_rounds} mortar rounds left."
@@ -102,7 +131,7 @@ def resolve_mortar(state, target_zone, rounds=1):
             if 0 <= idx + offset < len(zones):
                 actual_zone = zones[idx + offset]
                 narratives.append(f"Mortar shells scatter, impacting {actual_zone} zone.")
-        targets = [u for u in state.units if u.side == "defender" and u.zone == actual_zone and u.is_alive()]
+        targets = [u for u in state.units if u.side != state.player_side and u.zone == actual_zone and u.is_alive()]
         if not targets:
             narratives.append(f"Shells land in {actual_zone} zone but find no targets.")
             continue
@@ -129,13 +158,24 @@ def resolve_fpv_drone(state, target_name=None):
         return "No FPV drones available."
     state.fpv_drones -= 1
     add_detection(state, "long")
-    targets = [u for u in state.units if u.side == "defender" and u.is_alive()]
+    targets = [u for u in state.units if u.side != state.player_side and u.is_alive()]
     if not targets:
         return "Drone buzzes overhead but finds no enemy."
+
     if target_name:
-        target = next((u for u in targets if target_name.lower() in u.name.lower()), targets[0])
+        # Normalise: take first word (e.g., "rpg" from "rpg gunner")
+        first_word = target_name.split()[0].lower()
+        # Try exact match (case‑insensitive) first
+        target = next((u for u in targets if u.name.lower() == target_name.lower()), None)
+        if not target:
+            # Then try substring match on the first word (e.g., "rpg" in "RPG Gunner")
+            target = next((u for u in targets if first_word in u.name.lower()), None)
+        if not target:
+            # Finally, fallback to first target
+            target = targets[0]
     else:
         target = random.choice(targets)
+
     if random.random() < 0.9:
         target.status = "kia"
         target.morale = 0
@@ -144,40 +184,94 @@ def resolve_fpv_drone(state, target_name=None):
         target.status = "suppressed"
         target.morale -= 30
         narrative = f"Drone detonates close. {target.name} suppressed."
+
     mc = morale_cascade(state, target)
     if mc:
         narrative += " " + mc
     return narrative
 
+def resolve_rpg_attack(state, attacker, target_zone):
+    """RPG attack – high damage, can one-shot."""
+    targets = [u for u in state.units if u.side == state.player_side and u.zone == target_zone and u.is_alive()]
+    if not targets:
+        return f"{attacker.name} fires RPG but no targets in {target_zone} zone."
+    target = random.choice(targets)
+    hit_chance = 0.6
+    if random.random() < hit_chance:
+        damage = random.randint(15, 30)
+        target.hits += damage
+        target.morale -= 40
+        if target.hits >= 15:
+            target.status = "kia"
+            return f"{attacker.name} hits {target.name} with RPG! {target.name} is vaporized."
+        else:
+            target.status = "suppressed"
+            return f"{attacker.name} RPG blast wounds {target.name} severely."
+    else:
+        return f"{attacker.name} RPG flies wide, exploding harmlessly."
+
+def resolve_sniper_attack(state, attacker, target_zone):
+    """Sniper attack – high accuracy, high damage."""
+    targets = [u for u in state.units if u.side == state.player_side and u.zone == target_zone and u.is_alive()]
+    if not targets:
+        return f"{attacker.name} scans for targets but finds none in {target_zone} zone."
+    target = random.choice(targets)
+    hit_chance = 0.75
+    if random.random() < hit_chance:
+        damage = random.randint(12, 25)
+        target.hits += damage
+        target.morale -= 35
+        if target.hits >= 15:
+            target.status = "kia"
+            return f"{attacker.name} sniper shot hits {target.name} in the head! Killed instantly."
+        else:
+            target.status = "suppressed"
+            return f"{attacker.name} sniper wounds {target.name} severely."
+    else:
+        return f"{attacker.name} sniper shot misses."
+
 def resolve_infantry_fire(state, side, target_zone):
     attackers = [u for u in state.units if u.side == side and u.is_combat_effective()]
     if not attackers:
         return f"No combat-effective {side} units."
-    if side == "attacker":
+
+    if side == state.player_side:
         for a in attackers:
             add_detection(state, a.zone)
-    target_side = "defender" if side == "attacker" else "attacker"
+
+    target_side = state.player_side if side != state.player_side else ("defender" if state.player_side == "attacker" else "attacker")
     targets = [u for u in state.units if u.side == target_side and u.zone == target_zone and u.is_alive()]
     if not targets:
         return f"Small arms fire sweeps {target_zone} zone but finds no enemies."
-    difficulty_mod = DIFFICULTY[state.difficulty]["enemy_accuracy"] if side == "defender" else 1.0
+
+    difficulty_mod = DIFFICULTY[state.difficulty]["enemy_accuracy"] if side != state.player_side else 1.0
     narratives = []
-    for attacker in attackers[:2]:
+
+    firing_units = attackers[:2] if side == state.player_side else attackers
+
+    for attacker in firing_units:
         target = random.choice(targets)
         attacker.ammo -= 3 if attacker.type == "lmg" else 1
         if attacker.ammo < 0:
             attacker.ammo = 0
             continue
+
         wound_penalty = 0
         if attacker.hits > 10:
             wound_penalty = 0.2
         elif attacker.hits > 5:
             wound_penalty = 0.1
+
         cover = COVER_VALUES.get(target.zone, 0)
-        hit_chance = calculate_hit(attacker.zone, target.zone, cover, state.weather, target.status == "suppressed", wound_penalty)
+        hit_chance = calculate_hit(
+            attacker.zone, target.zone, cover,
+            state.weather, target.status == "suppressed", wound_penalty
+        )
         hit_chance *= difficulty_mod
-        cover_thickness = {"close":2, "medium":3, "long":1, "extreme":0}.get(target.zone, 0)
+
+        cover_thickness = {"close": 2, "medium": 3, "long": 1, "extreme": 0}.get(target.zone, 0)
         ammo_type = "ball"
+
         if calculate_penetration(cover_thickness, ammo_type):
             if random.random() < hit_chance:
                 damage = roll_dice(6, 2)
@@ -195,69 +289,100 @@ def resolve_infantry_fire(state, side, target_zone):
                 if mc:
                     narratives.append(mc)
             else:
-                narratives.append(f"{attacker.name} misses {target.name}.")
+                msg = random.choice(MISS_MSGS).format(attacker=attacker.name, target=target.name)
+                narratives.append(msg)
         else:
-            narratives.append(f"Bullets ricochet off cover. No effect.")
-            if random.random() < 0.3:
-                area_suppression(state, target_zone)
-    return " ".join(narratives)
+            narratives.append(random.choice(RICOCHET_MSGS))
+
+    # Deduplicate consecutive identical messages
+    deduped = []
+    for msg in narratives:
+        if deduped and deduped[-1][0] == msg:
+            deduped[-1] = (msg, deduped[-1][1] + 1)
+        else:
+            deduped.append((msg, 1))
+
+    final = []
+    for msg, count in deduped:
+        if count > 1:
+            final.append(f"{msg} (×{count})")
+        else:
+            final.append(msg)
+
+    if random.random() < 0.3:
+        area_suppression(state, target_zone)
+
+    return " ".join(final)
 
 def resolve_advance(state, target_zone):
     valid_zones = ["close", "medium", "long", "extreme"]
     if target_zone not in valid_zones:
         target_zone = "medium"
     for unit in state.units:
-        if unit.side == "attacker" and unit.is_alive():
+        if unit.side == state.player_side and unit.is_alive():
             unit.zone = target_zone
     return f"Squad advances to {target_zone.upper()} zone."
 
 def resolve_recon(state):
     if state.recon_active > 0:
         return "Recon drone already active."
-    defenders = [u for u in state.units if u.side == "defender" and u.is_combat_effective()]
+    defenders = [u for u in state.units if u.side != state.player_side and u.is_combat_effective()]
     if defenders and random.random() < 0.3:
-        return "Recon drone shot down by enemy fire."
+        failure_msgs = [
+            "Recon drone shot down by enemy fire.",
+            "Drone intercepted — enemy AA active.",
+            "Signal lost. Drone goes dark.",
+            "Enemy small arms bring down the drone.",
+        ]
+        return random.choice(failure_msgs)
     if state.weather == "night":
         state.recon_active = 2
-        return "Recon drone launched but night limits visibility. Enemy positions partially revealed."
+        return "Recon drone launched. Night limits visibility — enemy positions partially revealed for 2 turns."
     else:
         state.recon_active = 3
-        return "Recon drone launched. Enemy positions revealed."
+        return "Recon drone launched. Enemy positions revealed for 3 turns."
 
 def resolve_surrender(state):
-    defenders = [u for u in state.units if u.side == "defender" and u.is_alive()]
-    avg_morale = sum(u.morale for u in defenders) / len(defenders) if defenders else 0
-    if avg_morale < 30 or len(defenders) <= 2:
-        for u in defenders:
+    enemies = [u for u in state.units if u.side != state.player_side and u.is_alive()]
+    avg_morale = sum(u.morale for u in enemies) / len(enemies) if enemies else 0
+    if avg_morale < 30 or len(enemies) <= 2:
+        for u in enemies:
             u.status = "routed"
         state.game_over = True
-        state.winner = "attacker"
+        state.winner = state.player_side
         return "Enemy surrenders! Victory!"
     else:
         return "Enemy refuses to surrender."
 
-def check_victory(state):
+def check_victory_tactical(state):
     if state.game_over:
         return True
-    attackers_alive = [u for u in state.units if u.side == "attacker" and u.is_alive()]
-    defenders_alive = [u for u in state.units if u.side == "defender" and u.is_alive()]
-    if not attackers_alive:
+    player_alive = [u for u in state.units if u.side == state.player_side and u.is_alive()]
+    enemy_alive = [u for u in state.units if u.side != state.player_side and u.is_alive()]
+
+    if not player_alive:
         state.game_over = True
-        state.winner = "defender"
+        state.winner = "enemy"
         state.last_narrative = "Your forces are destroyed. Defeat."
         return True
-    if not defenders_alive:
+
+    if not enemy_alive:
         state.game_over = True
-        state.winner = "attacker"
-        state.last_narrative = "Enemy wiped out. Victory!"
+        state.winner = state.player_side
+        state.last_narrative = "All enemies eliminated. Victory!"
         return True
-    defenders_in_obj = [u for u in defenders_alive if u.zone == state.objective_zone]
-    attackers_in_obj = [u for u in attackers_alive if u.zone == state.objective_zone]
-    if not defenders_in_obj and attackers_in_obj:
-        state.game_over = True
-        state.winner = "attacker"
-        state.last_narrative = f"Objective {state.objective_zone.upper()} secured. Victory!"
-        return True
+
+    # Attacker-specific objective victory
+    if state.player_side == "attacker":
+        enemies_in_obj = [u for u in enemy_alive if u.zone == state.objective_zone]
+        players_in_obj = [u for u in player_alive if u.zone == state.objective_zone]
+        if not enemies_in_obj and players_in_obj:
+            state.game_over = True
+            state.winner = state.player_side
+            state.last_narrative = f"Objective {state.objective_zone.upper()} secured. Victory!"
+            return True
+
+    # Defender does NOT win by objective condition alone – must eliminate all enemies
     return False
 
 def apply_command_delay(state, unit_id):
@@ -271,7 +396,7 @@ def apply_command_delay(state, unit_id):
 def recover_suppression(state):
     messages = []
     for unit in state.units:
-        if unit.status == "suppressed" and unit.side == "attacker":
+        if unit.status == "suppressed" and unit.side == state.player_side:
             unit.morale += random.randint(1, 5)
             if unit.morale >= 50:
                 unit.status = "active"
@@ -294,7 +419,7 @@ def tactical_resupply(state):
     if state.supply_points >= 20:
         state.supply_points -= 20
         for unit in state.units:
-            if unit.side == "attacker" and unit.is_alive():
+            if unit.side == state.player_side and unit.is_alive():
                 if unit.type == "rifleman":
                     unit.ammo = min(30, unit.ammo + 15)
                 elif unit.type == "lmg":
@@ -308,7 +433,13 @@ def change_weather(state):
         weathers = ["clear", "rain", "fog", "night"]
         new = random.choice([w for w in weathers if w != state.weather])
         state.weather = new
-        return f"Weather changes to {new.upper()}."
+        effects = {
+            "rain": "Rain reduces visibility and hit chance.",
+            "fog":  "Fog blankets the field. All fire accuracy reduced.",
+            "night": "Darkness falls. Recon drones lose effectiveness.",
+            "clear": "Skies clear. Full visibility restored."
+        }
+        return f"Weather changes to {new.upper()}. {effects.get(new, '')}"
     return None
 
 def civilian_casualty_check(state, zone):
@@ -331,14 +462,6 @@ def decay_detection(state):
             new_detected.append(zone)
     state.detected_zones = new_detected
 
-def refresh_detection(state, zone):
-    """Call when a zone is detected to reset its timer."""
-    if not hasattr(state, 'detected_timer'):
-        state.detected_timer = {}
-    state.detected_timer[zone] = state.turn
-    if zone not in state.detected_zones:
-        state.detected_zones.append(zone)
-
 def apply_civilian_tension(state):
     increment = state.civilian_casualties // 10000
     if increment > 0:
@@ -359,7 +482,7 @@ def strategic_missile_strike(state, missile_type, target_asset):
                 state.enemy_strategic.warships = max(0, state.enemy_strategic.warships - damage)
                 narrative = f"Ballistic missile strike hits enemy warships. {damage} sunk."
             elif target_asset == "air_defense":
-                state.enemy_strategic.air_defense = max(0, state.enemy_strategic.air_defense - damage*2)
+                state.enemy_strategic.air_defense = max(0, state.enemy_strategic.air_defense - damage * 2)
                 narrative = "Ballistic missile strike degrades enemy air defense."
             elif target_asset == "missile_silos":
                 state.enemy_strategic.missile_silos = max(0, state.enemy_strategic.missile_silos - damage)
@@ -379,7 +502,7 @@ def strategic_missile_strike(state, missile_type, target_asset):
                 state.enemy_strategic.air_defense = max(0, state.enemy_strategic.air_defense - damage)
                 narrative = "Cruise missiles overwhelm enemy air defense."
             else:
-                state.enemy_strategic.warships = max(0, state.enemy_strategic.warships - damage//2)
+                state.enemy_strategic.warships = max(0, state.enemy_strategic.warships - damage // 2)
                 narrative = "Cruise missiles strike enemy positions."
         else:
             narrative = "Cruise missiles shot down."
@@ -397,7 +520,7 @@ def strategic_missile_strike(state, missile_type, target_asset):
         if state.enemy_strategic.warships > 0:
             hits = random.randint(1, min(3, state.enemy_strategic.warships))
             state.enemy_strategic.warships -= hits
-            narrative = f"Anti‑ship missiles sink {hits} enemy warships."
+            narrative = f"Anti-ship missiles sink {hits} enemy warships."
         else:
             narrative = "No enemy warships to target."
         state.global_tension += 3
@@ -447,12 +570,13 @@ def strategic_space_deployment(state):
         state.strategic.intelligence_level = min(100, state.strategic.intelligence_level + 10)
         state.enemy_strategic.space_assets = max(0, state.enemy_strategic.space_assets - random.randint(1, 5))
         state.global_tension += 1
-        return "Space assets provide real‑time targeting data. Our intel improved."
+        return "Space assets provide real-time targeting data. Our intel improved."
     else:
         return "No space assets available."
 
 def strategic_psyops(state):
-    if state.influence_ops > 0:
+    influence = getattr(state, 'influence_ops', 0)
+    if influence > 0:
         state.enemy_strategic.intelligence_level = max(0, state.enemy_strategic.intelligence_level - 15)
         state.global_tension += 1
         return "Psychological operations sow confusion among enemy ranks. Their intel reduced."
@@ -475,9 +599,11 @@ def strategic_produce_missiles(state):
         return "Insufficient production points."
 
 def strategic_sanctions(state):
-    if state.diplomatic_pressure:
-        state.sanctions += 10
-        state.enemy_war_economy = max(0, state.enemy_war_economy - 5)
+    diplomatic_pressure = getattr(state, 'diplomatic_pressure', True)
+    if diplomatic_pressure:
+        state.sanctions = getattr(state, 'sanctions', 0) + 10
+        enemy_economy = getattr(state, 'enemy_war_economy', 100)
+        state.enemy_war_economy = max(0, enemy_economy - 5)
         return "Sanctions imposed on enemy. Their war economy suffers."
     else:
         return "Diplomatic climate not suitable for sanctions."

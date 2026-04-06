@@ -37,6 +37,7 @@ def generate_strategic_scenario(scenario_name, difficulty, player_faction, enemy
     state.strategic = assign_assets(player_faction)
     state.enemy_strategic = assign_assets(enemy_faction)
     state.enemy_war_economy = 50
+    state.player_side = "attacker"   # strategic mode always attacker
 
     # Scenario-specific modifications
     if scenario_name == "Strait of Hormuz":
@@ -69,7 +70,7 @@ def generate_strategic_scenario(scenario_name, difficulty, player_faction, enemy
     return state
 
 # ----------------------------------------------------------------------
-# LLM scenario generator (placeholder – keep your existing)
+# LLM scenario generator (placeholder)
 # ----------------------------------------------------------------------
 def generate_scenario_via_llm(mission_type, difficulty, provider, api_key):
     if not api_key:
@@ -82,53 +83,75 @@ def build_state_from_llm_data(data, difficulty):
     return GameState(difficulty=difficulty)
 
 # ----------------------------------------------------------------------
-# Static tactical scenarios (fallback)
+# Static tactical scenarios – now supports attacker/defender
 # ----------------------------------------------------------------------
 def generate_broken_anvil_static(difficulty, player_faction="NATO", enemy_faction="RUSSIA", player_side="attacker"):
-    state = GameState(difficulty=difficulty, weather="fog", objective_zone="medium", mortar_rounds=10, fpv_drones=2)
+    state = GameState(difficulty=difficulty, weather="fog", objective_zone="medium", mortar_rounds=6, fpv_drones=2)
     state.terrain_description = "Ruins of Donetsk airport: broken concrete, burned vehicles, a standing control tower. Fog reduces visibility."
     state.obstacles = ["close-medium"]
     state.player_faction = player_faction
     state.enemy_faction = enemy_faction
+    state.player_side = player_side
 
-    # Player units
+    # Determine zones based on player side
+    if player_side == "attacker":
+        player_start_zone = "long"
+        enemy_start_zone = "medium"
+    else:  # defender
+        player_start_zone = "medium"   # defending the objective
+        enemy_start_zone = "long"      # attackers start further away
+
+    # Player units (6 units: 4 rifle + 2 LMG)
     faction_data = FACTIONS[player_faction]
     ranks = faction_data["ranks"]
     names = faction_data["personnel_names"]
     player_unit_types = [
-        ("rifleman", 0, 0, 30, 85), ("rifleman", 1, 1, 30, 80), ("rifleman", 2, 2, 30, 75),
-        ("rifleman", 3, 3, 30, 75), ("lmg", 4, 4, 100, 85), ("lmg", 0, 5, 100, 80)
+        ("rifleman", 0, 0, 30, 85),
+        ("rifleman", 1, 1, 30, 80),
+        ("rifleman", 2, 2, 30, 75),
+        ("rifleman", 3, 3, 30, 75),
+        ("lmg",      4, 4, 80, 85),
+        ("lmg",      0, 5, 80, 80),
     ]
     for i, (utype, rank_idx, name_idx, ammo, morale) in enumerate(player_unit_types):
         full_name = f"{ranks[rank_idx % len(ranks)]} {names[name_idx % len(names)]}"
-        state.units.append(Unit(id=f"att_{i}", name=full_name, type=utype, side=player_side, zone="long", ammo=ammo, morale=morale, faction=player_faction))
-    # Enemy units
+        state.units.append(Unit(id=f"att_{i}", name=full_name, type=utype, side=player_side,
+                                zone=player_start_zone, ammo=ammo, morale=morale, faction=player_faction))
+
+    # Enemy units – extra militia, RPG gunner
     mp = DIFFICULTY[difficulty]["enemy_morale_penalty"]
     enemy_units = [
         ("Militia 1", "rifleman", 30, 90+mp, "Experienced fighter"),
         ("Militia 2", "rifleman", 30, 90+mp, "Hidden in rubble"),
         ("Militia 3", "rifleman", 30, 85+mp, "Fanatical"),
-        ("Heavy Gunner", "lmg", 150, 110+mp, "PKM gunner", 5),
-        ("RPG Gunner", "rifleman", 30, 95+mp, "Carries RPG-7")
+        ("Militia 4", "rifleman", 30, 85+mp, "Nervous but determined"),
+        ("Heavy Gunner", "lmg", 150, 110+mp, "PKM gunner in terminal window", 5),
+        ("RPG Gunner", "rifleman", 30, 95+mp, "Carries RPG-7", 0, ["rpg"]),
     ]
-    for i, (name, typ, ammo, morale, desc, *hits) in enumerate(enemy_units):
-        unit = Unit(id=f"def_{i}", name=name, type=typ, side="defender", zone="medium", ammo=ammo, morale=morale, description=desc, faction=enemy_faction)
-        if hits:
-            unit.hits = hits[0]
+    for i, (name, typ, ammo, morale, desc, *extra) in enumerate(enemy_units):
+        unit = Unit(id=f"def_{i}", name=name, type=typ, side=("attacker" if player_side == "defender" else "defender"),
+                    zone=enemy_start_zone, ammo=ammo, morale=morale, description=desc, faction=enemy_faction)
+        if len(extra) > 0 and isinstance(extra[0], int):
+            unit.hits = extra[0]
+        if len(extra) > 1:
+            unit.special_equipment = extra[1]
         state.units.append(unit)
 
-    # New fields
+    # Initialise fields
     state.building_damage = 0
-    state.supply_points = 100
+    state.supply_points = 80
     state.war_economy = 50
     state.production_points = 10
     state.sanctions = 0
-    state.ied_threat = random.randint(0, 30)
+    state.ied_threat = random.randint(10, 40)
     state.civilian_density = random.randint(10, 60)
     state.media_attention = 0
     state.war_crimes_allegations = 0
     state.roe = "restricted"
-    state.last_narrative = f"Fog clings to the ruins. Your {player_faction} squad prepares to assault the terminal held by {enemy_faction} separatists."
+    if player_side == "attacker":
+        state.last_narrative = f"Fog clings to the ruins. Your {player_faction} squad prepares to assault the terminal held by {enemy_faction} separatists. Mortars are limited – use them wisely."
+    else:
+        state.last_narrative = f"Fog clings to the ruins. Your {player_faction} squad defends the terminal against {enemy_faction} attackers. Hold the line."
     return state
 
 def generate_night_raid_static(difficulty, player_faction="NATO", enemy_faction="RUSSIA", player_side="attacker"):
@@ -137,25 +160,41 @@ def generate_night_raid_static(difficulty, player_faction="NATO", enemy_faction=
     state.obstacles = []
     state.player_faction = player_faction
     state.enemy_faction = enemy_faction
+    state.player_side = player_side
 
+    if player_side == "attacker":
+        player_start_zone = "long"
+        enemy_start_zone = "medium"
+    else:
+        player_start_zone = "medium"   # defender holds the compound
+        enemy_start_zone = "long"
+
+    # Player units – 4 operators
     faction_data = FACTIONS[player_faction]
     ranks = faction_data["ranks"]
     names = faction_data["personnel_names"]
     for i in range(4):
         full_name = f"{ranks[i % len(ranks)]} {names[i % len(names)]}"
-        state.units.append(Unit(id=f"sog_{i}", name=full_name, type="rifleman", side=player_side, zone="long", ammo=45, morale=95, faction=player_faction))
+        state.units.append(Unit(id=f"sog_{i}", name=full_name, type="rifleman", side=player_side,
+                                zone=player_start_zone, ammo=45, morale=95, faction=player_faction))
+
+    # Enemy units – 3 guards + sniper
     mp = DIFFICULTY[difficulty]["enemy_morale_penalty"]
     enemy_units = [
         ("Militant", "rifleman", 30, 80+mp, "Patrol"),
         ("Militant", "rifleman", 30, 80+mp, "Lookout"),
         ("Militant", "rifleman", 30, 80+mp, "Guard"),
-        ("Sniper", "rifleman", 20, 90+mp, "Hidden in minaret")
+        ("Sniper", "rifleman", 20, 90+mp, "Hidden in minaret", 0, ["sniper"]),
     ]
-    for i, (name, typ, ammo, morale, desc) in enumerate(enemy_units):
-        zone = "close" if i == 3 else "medium"
-        state.units.append(Unit(id=f"def_{i}", name=name, type=typ, side="defender", zone=zone, ammo=ammo, morale=morale, description=desc, faction=enemy_faction))
+    for i, (name, typ, ammo, morale, desc, *extra) in enumerate(enemy_units):
+        zone = "close" if i == 3 else enemy_start_zone
+        unit = Unit(id=f"def_{i}", name=name, type=typ, side=("attacker" if player_side == "defender" else "defender"),
+                    zone=zone, ammo=ammo, morale=morale, description=desc, faction=enemy_faction)
+        if len(extra) > 1:
+            unit.special_equipment = extra[1]
+        state.units.append(unit)
 
-    # New fields
+    # Initialise fields
     state.building_damage = 0
     state.supply_points = 100
     state.war_economy = 50
@@ -166,7 +205,10 @@ def generate_night_raid_static(difficulty, player_faction="NATO", enemy_faction=
     state.media_attention = 0
     state.war_crimes_allegations = 0
     state.roe = "restricted"
-    state.last_narrative = f"Moonless night. Your {player_faction} operators move silently. The compound is held by {enemy_faction} militants."
+    if player_side == "attacker":
+        state.last_narrative = f"Moonless night. Your {player_faction} operators move silently. The compound is held by {enemy_faction} militants. A sniper is in the minaret."
+    else:
+        state.last_narrative = f"Moonless night. Your {player_faction} squad defends the compound against {enemy_faction} attackers. The sniper is your ally."
     return state
 
 def generate_mission(mission_type, difficulty, provider, api_key, player_faction, enemy_faction, player_side="attacker"):
@@ -175,6 +217,7 @@ def generate_mission(mission_type, difficulty, provider, api_key, player_faction
         state = build_state_from_llm_data(llm_data, difficulty)
         state.player_faction = player_faction
         state.enemy_faction = enemy_faction
+        state.player_side = player_side
     else:
         if mission_type == "night_raid":
             state = generate_night_raid_static(difficulty, player_faction, enemy_faction, player_side)
