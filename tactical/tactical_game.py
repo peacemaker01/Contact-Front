@@ -81,19 +81,17 @@ class TacticalGame:
         if act == "move" and action.get("target_tile"):
             tx, ty = action["target_tile"]
             old_x, old_y = unit.x, unit.y
-            steps = []
-            cx, cy = unit.x, unit.y
-            while cx != tx or cy != ty:
-                if cx < tx: cx += 1
-                elif cx > tx: cx -= 1
-                elif cy < ty: cy += 1
-                elif cy > ty: cy -= 1
-                steps.append((cx, cy))
-            total_cost = sum(self.state.map_grid[cy][cx].movement_cost for (cx, cy) in steps)
+
+            # SIMPLE MANHATTAN DISTANCE (1 MP per tile, ignoring terrain)
+            distance = abs(tx - old_x) + abs(ty - old_y)
+            total_cost = distance  # force 1 MP per tile
+
             if total_cost <= unit.movement_points:
                 unit.x, unit.y = tx, ty
                 unit.movement_points -= total_cost
-                self.state.narrative_log.append(f"{unit.name} moves to ({tx},{ty}). {unit.movement_points} MP left.")
+                self.state.narrative_log.append(f"{unit.name} moves from ({old_x},{old_y}) to ({tx},{ty}). {unit.movement_points} MP left.")
+                # DEBUG: print to terminal
+                print(f"DEBUG: {unit.name} moved to ({unit.x},{unit.y})")
             else:
                 self.state.narrative_log.append(f"Not enough MP. Need {total_cost}, have {unit.movement_points}.")
         elif act in ["fire", "suppress"]:
@@ -132,6 +130,9 @@ class TacticalGame:
         elif act == "recon":
             radius = action["parameters"].get("radius", 3)
             self.state.narrative_log.append(f"Recon reveals enemies within {radius} tiles.")
+        elif act == "debug_positions":
+            msg = "Unit positions: " + ", ".join([f"{u.name} ({u.type_code}{u.id}) at ({u.x},{u.y})" for u in self.state.friendly_units if not u.destroyed])
+            self.state.narrative_log.append(msg)
         else:
             self.state.narrative_log.append(f"Unknown action: {act}")
         self.state.turn += 1
@@ -166,7 +167,7 @@ class TacticalGame:
                         resolve_fire(enemy, target, tile.cover_bonus, "fire", self.state)
                         self.state.narrative_log.append(f"Enemy {enemy.name} fires at {target.name}.")
         else:
-            # Fallback: simple AI (fire at closest)
+            # Fallback simple AI
             for enemy in self.state.enemy_units:
                 if enemy.destroyed:
                     continue
