@@ -1,197 +1,84 @@
-import re
+import json
+from typing import Optional, Dict, Any
 
 class CommandParser:
     def __init__(self, llm_engine):
         self.llm = llm_engine
 
-    def parse(self, player_input, game_state):
-        cmd = player_input.lower().strip()
+    def parse(self, player_input: str, game_state) -> Optional[Dict[str, Any]]:
+        """
+        Parse natural language command using only the LLM.
+        Returns None if LLM is unavailable or fails.
+        """
+        cmd = player_input.strip()
         if not cmd:
             return None
 
-        def extract_unit_id(text):
-            m = re.search(r'\b([a-z][0-9]+)\b', text)
-            if m:
-                return int(m.group(1)[1:])
-            m = re.search(r'\b(\d+)\b', text)
-            if m:
-                return int(m.group(1))
+        # Ensure LLM is available
+        if not self.llm or not self.llm.api_key:
+            print("[Parser] No LLM API key available. Cannot interpret command.")
             return None
 
-        # ----- Recon drone deploy -----
-        if "deploy recon" in cmd or "launch recon" in cmd:
-            unit_id = extract_unit_id(cmd) or 1
-            return {
-                "action_type": "deploy_recon_drone",
-                "unit_id": unit_id,
-                "target_tile": None,
-                "target_unit_id": None,
-                "parameters": {"radius": 5},
-                "narrative_reason": "Deploy recon drone"
-            }
-
-        # ----- FPV kamikaze attack -----
-        if ("fpv" in cmd or "kamikaze" in cmd) and "at" in cmd:
-            m = re.search(r'at\s+([a-z][0-9]+)', cmd)
-            if m:
-                target_id = int(m.group(1)[1:])
-                unit_id = extract_unit_id(cmd) or 1
-                return {
-                    "action_type": "fpv_attack",
-                    "unit_id": unit_id,
-                    "target_tile": None,
-                    "target_unit_id": target_id,
-                    "parameters": {},
-                    "narrative_reason": f"FPV drone attack on {target_id}"
-                }
-
-        # ----- Relative movement -----
-        rel_patterns = [
-            r'move\s+([a-z][0-9]+)\s+(?:(\d+)\s*(?:tile|step|space)s?\s*)?(north|south|east|west|ne|nw|se|sw|n|s|e|w)',
-            r'go\s+([a-z][0-9]+)\s+(?:(\d+)\s*(?:tile|step|space)s?\s*)?(north|south|east|west|ne|nw|se|sw|n|s|e|w)',
-            r'advance\s+([a-z][0-9]+)\s+(?:(\d+)\s*(?:tile|step|space)s?\s*)?(north|south|east|west|ne|nw|se|sw|n|s|e|w)',
-        ]
-        dir_map = {
-            'north': (0, -1), 'n': (0, -1), 'south': (0, 1), 's': (0, 1),
-            'east': (1, 0), 'e': (1, 0), 'west': (-1, 0), 'w': (-1, 0),
-            'ne': (1, -1), 'northeast': (1, -1), 'nw': (-1, -1), 'northwest': (-1, -1),
-            'se': (1, 1), 'southeast': (1, 1), 'sw': (-1, 1), 'southwest': (-1, 1)
-        }
-        for pattern in rel_patterns:
-            m = re.search(pattern, cmd)
-            if m:
-                unit_id = int(m.group(1)[1:])
-                distance = int(m.group(2)) if m.group(2) else 1
-                direction = m.group(3)
-                dx, dy = dir_map.get(direction, (0, 0))
-                unit = next((u for u in game_state.friendly_units if u.id == unit_id and not u.destroyed), None)
-                if unit:
-                    new_x = unit.x + (dx * distance)
-                    new_y = unit.y + (dy * distance)
-                    new_x = max(0, min(new_x, len(game_state.map_grid[0]) - 1))
-                    new_y = max(0, min(new_y, len(game_state.map_grid) - 1))
-                    return {
-                        "action_type": "move",
-                        "unit_id": unit_id,
-                        "target_tile": (new_x, new_y),
-                        "target_unit_id": None,
-                        "parameters": {},
-                        "narrative_reason": f"Move {distance} tile(s) {direction}"
-                    }
-
-        # ----- Absolute movement -----
-        abs_patterns = [
-            r'move\s+([a-z][0-9]+)\s+(?:to\s+)?(\d+)[,\s]+(\d+)',
-            r'move\s+(\d+)\s+(?:to\s+)?(\d+)[,\s]+(\d+)',
-            r'([a-z][0-9]+)\s+move\s+(?:to\s+)?(\d+)[,\s]+(\d+)',
-            r'(\d+)\s+move\s+(?:to\s+)?(\d+)[,\s]+(\d+)',
-        ]
-        for pattern in abs_patterns:
-            m = re.search(pattern, cmd)
-            if m:
-                unit_str = m.group(1)
-                try:
-                    unit_id = int(unit_str) if unit_str.isdigit() else int(unit_str[1:])
-                except:
-                    continue
-                x, y = int(m.group(2)), int(m.group(3))
-                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
-                    return {
-                        "action_type": "move",
-                        "unit_id": unit_id,
-                        "target_tile": (x, y),
-                        "target_unit_id": None,
-                        "parameters": {},
-                        "narrative_reason": f"Move unit {unit_id} to ({x},{y})"
-                    }
-
-        # ----- Fire / suppress -----
-        fire_patterns = [
-            r'(?:fire|shoot|engage)\s+(?:at\s+)?([a-z][0-9]+)',
-            r'([a-z][0-9]+)\s+(?:fire|shoot|engage)\s+(?:at\s+)?([a-z][0-9]+)',
-            r'suppress\s+([a-z][0-9]+)',
-        ]
-        for pattern in fire_patterns:
-            m = re.search(pattern, cmd)
-            if m:
-                if len(m.groups()) == 2:
-                    shooter_str, target_str = m.groups()
-                    try:
-                        shooter_id = int(shooter_str[1:]) if shooter_str[0].isalpha() else int(shooter_str)
-                        target_id = int(target_str[1:]) if target_str[0].isalpha() else int(target_str)
-                    except:
-                        continue
-                else:
-                    target_str = m.group(1)
-                    try:
-                        target_id = int(target_str[1:]) if target_str[0].isalpha() else int(target_str)
-                    except:
-                        continue
-                    shooter_id = extract_unit_id(cmd) or 1
-                if any(u.id == target_id for u in game_state.enemy_units if not u.destroyed):
-                    action_type = "suppress" if "suppress" in cmd else "fire"
-                    return {
-                        "action_type": action_type,
-                        "unit_id": shooter_id,
-                        "target_tile": None,
-                        "target_unit_id": target_id,
-                        "parameters": {},
-                        "narrative_reason": f"Unit {shooter_id} fires at enemy {target_id}"
-                    }
-
-        # ----- Artillery -----
-        arty_patterns = [
-            r'(?:artillery|arty|shell)\s+(?:on|at|strike)?\s*(\d+)[,\s]+(\d+)',
-            r'call\s+(?:artillery|arty)\s+(?:on|at)?\s*(\d+)[,\s]+(\d+)',
-        ]
-        for pattern in arty_patterns:
-            m = re.search(pattern, cmd)
-            if m:
-                x, y = int(m.group(1)), int(m.group(2))
-                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
-                    return {
-                        "action_type": "call_arty",
-                        "unit_id": 1,
-                        "target_tile": (x, y),
-                        "target_unit_id": None,
-                        "parameters": {"rounds": 4},
-                        "narrative_reason": f"Artillery strike on ({x},{y})"
-                    }
-
-        # ----- Recon (area) -----
-        if "recon" in cmd or "scout" in cmd:
-            m = re.search(r'(\d+)[,\s]+(\d+)', cmd)
-            if m:
-                x, y = int(m.group(1)), int(m.group(2))
-                return {
-                    "action_type": "recon",
-                    "unit_id": 1,
-                    "target_tile": (x, y),
-                    "target_unit_id": None,
-                    "parameters": {"radius": 3},
-                    "narrative_reason": f"Recon area around ({x},{y})"
-                }
-            else:
-                unit_id = extract_unit_id(cmd) or 1
-                return {
-                    "action_type": "recon",
-                    "unit_id": unit_id,
-                    "target_tile": None,
-                    "target_unit_id": None,
-                    "parameters": {"radius": 3},
-                    "narrative_reason": "General recon"
-                }
-
-        # ----- LLM fallback -----
-        if self.llm and self.llm.api_key:
+        try:
+            # Build a minimal game state summary for the LLM
             summary = {
                 "turn": game_state.turn,
-                "friendly_units": [u.to_summary() for u in game_state.friendly_units if not u.destroyed],
-                "known_enemy": [u.to_summary() for u in game_state.enemy_units if not u.destroyed],
-                "resources": {"artillery": game_state.artillery_fires_remaining, "cas": game_state.cas_available}
+                "friendly_units": [
+                    {
+                        "id": u.id,
+                        "type_code": u.type_code,
+                        "x": u.x,
+                        "y": u.y,
+                        "movement_points": u.movement_points,
+                        "destroyed": u.destroyed
+                    }
+                    for u in game_state.friendly_units if not u.destroyed
+                ],
+                "known_enemy": [
+                    {
+                        "id": u.id,
+                        "type_code": u.type_code,
+                        "x": u.x,
+                        "y": u.y,
+                        "destroyed": u.destroyed
+                    }
+                    for u in game_state.enemy_units if not u.destroyed
+                ],
+                "map_width": len(game_state.map_grid[0]),
+                "map_height": len(game_state.map_grid)
             }
-            action = self.llm.parse_tactical_command(player_input, summary, game_state.player_faction)
-            if action and action.get("action_type") != "invalid":
+            action = self.llm.parse_tactical_command(cmd, summary, game_state.player_faction)
+            if action and self._validate_action(action, game_state):
                 return action
+            else:
+                print(f"[Parser] LLM returned invalid action: {action}")
+                return None
+        except Exception as e:
+            print(f"[Parser] LLM error: {e}")
+            return None
 
-        return None
+    def _validate_action(self, action: dict, game_state) -> bool:
+        """Ensure the action has required fields and references valid units/coordinates."""
+        if not isinstance(action, dict):
+            return False
+        if "action_type" not in action or "unit_id" not in action:
+            return False
+        unit_id = action["unit_id"]
+        # Unit must exist and be friendly
+        if not any(u.id == unit_id and not u.destroyed for u in game_state.friendly_units):
+            return False
+        act = action["action_type"]
+        if act == "move":
+            if "target_tile" not in action:
+                return False
+            tx, ty = action["target_tile"]
+            if not (0 <= tx < len(game_state.map_grid[0]) and 0 <= ty < len(game_state.map_grid)):
+                return False
+        elif act in ["fire", "suppress", "fpv_attack"]:
+            if "target_unit_id" not in action:
+                return False
+        elif act == "call_arty":
+            if "target_tile" not in action:
+                return False
+        # Other actions (recon, deploy_recon_drone, hold) don't need extra validation
+        return True

@@ -35,44 +35,95 @@ class LLMEngine:
                 if content.endswith("```"):
                     content = content[:-3]
                 return content.strip()
-            except Exception:
+            except Exception as e:
+                print(f"[LLM] Attempt {attempt+1} failed: {e}")
                 time.sleep(1)
         return FALLBACK_RESPONSE
 
     def parse_tactical_command(self, player_input, game_state_summary, faction):
-        system_prompt = f"""You are CONTACT FRONT military command interpreter.
-Map state: {json.dumps(game_state_summary)}
+        system_prompt = f"""You are a military command interpreter for CONTACT FRONT.
+Convert the player's command into JSON.
+
+Game state: {json.dumps(game_state_summary, indent=2)}
+
+Action types: "move", "fire", "suppress", "call_arty", "recon", "deploy_recon_drone", "fpv_attack", "hold".
+
+Rules:
+- "move": requires "unit_id" (int) and "target_tile" [x,y] (ints, 0-indexed).
+- "fire"/"suppress"/"fpv_attack": require "unit_id" and "target_unit_id".
+- "call_arty": requires "target_tile".
+- "deploy_recon_drone": requires "unit_id".
+- "hold": just "unit_id".
+
+Output ONLY valid JSON. No extra text.
+
 Player command: "{player_input}"
-Output JSON: action_type (move|fire|suppress|assault|call_arty|call_cas|fortify|recon|medic|fallback), unit_id (int), target_tile ([col,row] or null), target_unit_id (int or null), parameters (dict), narrative_reason (str). Invalid -> action_type="invalid"."""
+"""
         messages = [{"role": "system", "content": system_prompt}]
-        resp = self._call(messages)
+        resp = self._call(messages, temperature=0.2)
         try:
-            return json.loads(resp)
+            action = json.loads(resp)
+            if action.get("action_type") not in ["move","fire","suppress","call_arty","recon","deploy_recon_drone","fpv_attack","hold"]:
+                return None
+            return action
         except:
-            return json.loads(FALLBACK_RESPONSE)
+            return None
 
     def generate_ai_turn(self, game_state_summary, enemy_faction, difficulty):
-        system_prompt = f"""You command {enemy_faction} forces. Role: {"aggressive" if difficulty=="easy" else "defensive"}. Game state: {json.dumps(game_state_summary)}. Output JSON list of actions."""
+        system_prompt = f"""You are the enemy commander for {enemy_faction} (difficulty: {difficulty}).
+Current state: {json.dumps(game_state_summary, indent=2)}
+You may issue one action per enemy unit. Output a JSON list of actions (same schema as parse_tactical_command).
+If a unit should not act, use "hold".
+Think tactically. Output ONLY valid JSON. No extra text.
+"""
         messages = [{"role": "system", "content": system_prompt}]
         resp = self._call(messages, temperature=0.6)
         try:
+            if resp.startswith("```json"):
+                resp = resp[7:]
+            if resp.endswith("```"):
+                resp = resp[:-3]
             actions = json.loads(resp)
-            if isinstance(actions, dict) and "action_type" in actions:
+            if isinstance(actions, dict):
                 actions = [actions]
             return actions
         except:
             return []
 
     def narrate_outcome(self, action, result, faction):
-        prompt = f"Narrate result: {action}. Result: {result}. Faction: {faction}. Two sentences."
+        prompt = f"""Write a short (2‑3 sentences) military narrative for this outcome:
+Action: {json.dumps(action)}
+Result: {json.dumps(result)}
+Faction: {faction}
+Be concise, realistic, and engaging.
+"""
         messages = [{"role": "user", "content": prompt}]
-        return self._call(messages, temperature=0.7)[:200]
+        resp = self._call(messages, temperature=0.7)
+        return resp[:200] if resp else "Action completed."
 
     def generate_scenario_briefing(self, faction, submode, scenario_id):
-        prompt = f"""Generate tactical scenario for {faction} as {submode}. Output JSON: title, location_description, hq_orders, enemy_faction, enemy_strength_hint, time_limit_turns (8-15), objective_type, victory_conditions, defeat_conditions, special_conditions list."""
+        prompt = f"""Generate a unique tactical scenario for {faction} as {submode}. 
+Output JSON with: title, location_description, hq_orders, enemy_faction (choose from USA, RUSSIA, CHINA, IRAN), enemy_strength_hint, time_limit_turns (8-15), objective_type, victory_conditions, defeat_conditions, special_conditions (list).
+Be creative but realistic. Output ONLY valid JSON.
+"""
         messages = [{"role": "user", "content": prompt}]
-        resp = self._call(messages)
+        resp = self._call(messages, temperature=0.7)
         try:
+            if resp.startswith("```json"):
+                resp = resp[7:]
+            if resp.endswith("```"):
+                resp = resp[:-3]
             return json.loads(resp)
         except:
-            return {"title": "Default Battle", "location_description": "Open field", "hq_orders": "Capture objective", "enemy_faction": "RUSSIA", "enemy_strength_hint": "Unknown", "time_limit_turns": 10, "objective_type": "capture", "victory_conditions": "Hold objective", "defeat_conditions": "Lose all units", "special_conditions": []}
+            return {
+                "title": f"{faction} {submode} Operation",
+                "location_description": "Generic battlefield",
+                "hq_orders": f"{'Capture' if submode=='attacker' else 'Defend'} the objective.",
+                "enemy_faction": "RUSSIA" if faction != "RUSSIA" else "USA",
+                "enemy_strength_hint": "Unknown",
+                "time_limit_turns": 10,
+                "objective_type": "capture",
+                "victory_conditions": "Hold objective or destroy all enemies",
+                "defeat_conditions": "Lose all units",
+                "special_conditions": []
+            }

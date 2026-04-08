@@ -21,8 +21,10 @@ class TacticalGame:
         self._init_game()
 
     def _init_game(self):
-        briefing = self.scenario_gen.get_scenario(self.player_faction, self.submode, use_llm=bool(self.llm.api_key))
+        briefing = self.scenario_gen.get_scenario(self.player_faction, self.submode)
         enemy_faction = briefing.get("enemy_faction", "RUSSIA")
+        if enemy_faction not in FACTIONS:
+            enemy_faction = "RUSSIA" if self.player_faction != "RUSSIA" else "USA"
         map_grid, obj_coords = generate_tactical_map(width=50, height=14)
         if self.submode == "attacker":
             start_pos = [(3, y) for y in range(3, 12, 3)]
@@ -52,11 +54,12 @@ class TacticalGame:
             if not cmd:
                 self.state.narrative_log.append("No command entered.")
                 continue
+
             action = self.parser.parse(cmd, self.state)
             if not action:
-                self.state.narrative_log.append(f"Invalid command: '{cmd}'")
-                self.state.turn += 1
-                continue
+                self.state.narrative_log.append(f"Command not understood: '{cmd}'. (LLM may be unavailable or key invalid.)")
+                continue  # Do not advance turn
+
             self._resolve_action(action)
             if not self.state.game_over:
                 self._ai_turn()
@@ -74,26 +77,23 @@ class TacticalGame:
                 break
         if not unit:
             self.state.narrative_log.append(f"Unit {action['unit_id']} not found.")
-            self.state.turn += 1
             return
 
         act = action["action_type"]
         if act == "move" and action.get("target_tile"):
             tx, ty = action["target_tile"]
             old_x, old_y = unit.x, unit.y
-
-            # SIMPLE MANHATTAN DISTANCE (1 MP per tile, ignoring terrain)
+            if (tx, ty) == (old_x, old_y):
+                self.state.narrative_log.append(f"{unit.name} is already at ({tx},{ty}).")
+                return
             distance = abs(tx - old_x) + abs(ty - old_y)
-            total_cost = distance  # force 1 MP per tile
-
-            if total_cost <= unit.movement_points:
+            if distance <= unit.movement_points:
                 unit.x, unit.y = tx, ty
-                unit.movement_points -= total_cost
+                unit.movement_points -= distance
                 self.state.narrative_log.append(f"{unit.name} moves from ({old_x},{old_y}) to ({tx},{ty}). {unit.movement_points} MP left.")
-                # DEBUG: print to terminal
-                print(f"DEBUG: {unit.name} moved to ({unit.x},{unit.y})")
+                print(f"DEBUG: {unit.name} now at ({unit.x},{unit.y})")
             else:
-                self.state.narrative_log.append(f"Not enough MP. Need {total_cost}, have {unit.movement_points}.")
+                self.state.narrative_log.append(f"Not enough MP. Need {distance}, have {unit.movement_points}.")
         elif act in ["fire", "suppress"]:
             target_id = action.get("target_unit_id")
             target = None
@@ -103,6 +103,10 @@ class TacticalGame:
                     break
             if not target:
                 self.state.narrative_log.append(f"Enemy {target_id} not found.")
+                return
+            dist = abs(unit.x - target.x) + abs(unit.y - target.y)
+            if dist > 15:
+                self.state.narrative_log.append(f"Target out of range ({dist} tiles).")
                 return
             tile = self.state.map_grid[target.y][target.x]
             result = resolve_fire(unit, target, tile.cover_bonus, act, self.state)
@@ -114,6 +118,8 @@ class TacticalGame:
                 result = resolve_artillery(unit, target_tile, 4, self.state)
                 self.state.artillery_fires_remaining -= 1
                 self.state.narrative_log.append(f"Artillery strike at {target_tile} – {result['damage_pct']}% damage.")
+            else:
+                self.state.narrative_log.append("No target tile for artillery.")
         elif act == "deploy_recon_drone":
             self._deploy_recon_drone(unit, action["parameters"].get("radius", 5))
         elif act == "fpv_attack":
@@ -133,57 +139,45 @@ class TacticalGame:
         elif act == "debug_positions":
             msg = "Unit positions: " + ", ".join([f"{u.name} ({u.type_code}{u.id}) at ({u.x},{u.y})" for u in self.state.friendly_units if not u.destroyed])
             self.state.narrative_log.append(msg)
+        elif act == "hold":
+            self.state.narrative_log.append(f"{unit.name} holds position.")
         else:
             self.state.narrative_log.append(f"Unknown action: {act}")
         self.state.turn += 1
 
     def _ai_turn(self):
-        if self.llm.api_key:
-            summary = {
-                "turn": self.state.turn,
-                "enemy_units": [u.to_summary() for u in self.state.enemy_units if not u.destroyed],
-                "friendly_units": [u.to_summary() for u in self.state.friendly_units if not u.destroyed],
-                "resources": {"artillery": self.state.artillery_fires_remaining}
-            }
-            actions = self.llm.generate_ai_turn(summary, self.state.enemy_faction, self.difficulty)
-            for act in actions:
-                if act.get("action_type") == "fire":
-                    unit_id = act.get("unit_id")
-                    target_id = act.get("target_unit_id")
-                    enemy = None
-                    for u in self.state.enemy_units:
-                        if u.id == unit_id and not u.destroyed:
-                            enemy = u
-                            break
-                    if not enemy:
-                        continue
-                    target = None
-                    for u in self.state.friendly_units:
-                        if u.id == target_id and not u.destroyed:
-                            target = u
-                            break
-                    if target:
+        if not self.llm.api_key:
+            self.state.narrative_log.append("No LLM API key – enemy AI inactive.")
+            return
+        summary = {
+            "turn": self.state.turn,
+            "enemy_units": [u.to_summary() for u in self.state.enemy_units if not u.destroyed],
+            "friendly_units": [u.to_summary() for u in self.state.friendly_units if not u.destroyed],
+            "resources": {"artillery": self.state.artillery_fires_remaining}
+        }
+        actions = self.llm.generate_ai_turn(summary, self.state.enemy_faction, self.difficulty)
+        for act in actions:
+            if act.get("action_type") == "fire":
+                unit_id = act.get("unit_id")
+                target_id = act.get("target_unit_id")
+                enemy = None
+                for u in self.state.enemy_units:
+                    if u.id == unit_id and not u.destroyed:
+                        enemy = u
+                        break
+                if not enemy:
+                    continue
+                target = None
+                for u in self.state.friendly_units:
+                    if u.id == target_id and not u.destroyed:
+                        target = u
+                        break
+                if target:
+                    dist = abs(enemy.x - target.x) + abs(enemy.y - target.y)
+                    if dist <= 15:
                         tile = self.state.map_grid[target.y][target.x]
                         resolve_fire(enemy, target, tile.cover_bonus, "fire", self.state)
                         self.state.narrative_log.append(f"Enemy {enemy.name} fires at {target.name}.")
-        else:
-            # Fallback simple AI
-            for enemy in self.state.enemy_units:
-                if enemy.destroyed:
-                    continue
-                closest = None
-                min_dist = float('inf')
-                for friend in self.state.friendly_units:
-                    if friend.destroyed:
-                        continue
-                    dist = abs(enemy.x - friend.x) + abs(enemy.y - friend.y)
-                    if dist < min_dist:
-                        min_dist = dist
-                        closest = friend
-                if closest and min_dist <= 10:
-                    tile = self.state.map_grid[closest.y][closest.x]
-                    resolve_fire(enemy, closest, tile.cover_bonus, "fire", self.state)
-                    self.state.narrative_log.append(f"Enemy {enemy.name} fires at {closest.name}.")
 
     def _deploy_recon_drone(self, unit, radius):
         self.state.narrative_log.append(f"Recon drone deployed. Enemy positions revealed within {radius} tiles.")
@@ -191,6 +185,10 @@ class TacticalGame:
     def _fpv_attack(self, attacker, target):
         if attacker.ammo <= 0:
             self.state.narrative_log.append("No FPV drones available.")
+            return
+        dist = abs(attacker.x - target.x) + abs(attacker.y - target.y)
+        if dist > 10:
+            self.state.narrative_log.append(f"FPV drone out of range ({dist} tiles).")
             return
         hit_chance = attacker.accuracy_base
         if random.randint(1,100) <= hit_chance:

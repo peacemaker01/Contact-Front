@@ -13,6 +13,8 @@ def clear_screen():
     os.system("clear")
 
 def render_progress_bar(value, max_value, width=6):
+    if max_value <= 0:
+        return "N/A"
     filled = int((value / max_value) * width)
     bar = "█" * filled + "░" * (width - filled)
     pct = int((value / max_value) * 100)
@@ -28,7 +30,9 @@ def render_full_tactical_hud(game_state, map_render):
     print(header + " " * (cols - len(header) - 1) + "║")
     print("╠" + "═" * (cols - 2) + "╣")
     obj_desc = game_state.objectives[0].get('desc', 'Secure objective') if game_state.objectives else 'Capture area'
-    obj_line = f"║ OBJECTIVE: {obj_desc} (★) │ {game_state.max_turns - game_state.turn} turns remaining "
+    if isinstance(obj_desc, list):
+        obj_desc = "; ".join(obj_desc[:2])
+    obj_line = f"║ OBJECTIVE: {obj_desc[:50]} (★) │ {game_state.max_turns - game_state.turn} turns remaining "
     print(obj_line + " " * (cols - len(obj_line) - 1) + "║")
     print("╠" + "═" * (cols - 2) + "╣")
     map_lines = map_render.split('\n')
@@ -39,14 +43,19 @@ def render_full_tactical_hud(game_state, map_render):
         print("║  " + line + " " * (max_line_len - len(line)) + "  ║")
     print("╠" + "═" * (cols - 2) + "╣")
 
-    # Unit panel (left)
+    # Unit panel (left) with coordinates
     friendly = [u for u in game_state.friendly_units if not u.destroyed]
     unit_lines = []
     for u in friendly[:4]:
-        unit_lines.append(f"[{u.id}] {u.type_code}{u.id} | {u.name[:20]}")
+        unit_lines.append(f"[{u.id}] {u.type_code}{u.id} ({u.x},{u.y}) | {u.name[:18]}")
         unit_lines.append(f"    STR:{render_progress_bar(u.strength,100,6)}")
         unit_lines.append(f"    MOR:{render_progress_bar(u.morale,100,6)}")
-        unit_lines.append(f"    AMMO:{render_progress_bar(u.ammo,u.max_ammo,5)}")
+        # Handle ammo: if max_ammo == 0, show "N/A"
+        if u.max_ammo > 0:
+            unit_lines.append(f"    AMMO:{render_progress_bar(u.ammo, u.max_ammo, 5)}")
+        else:
+            unit_lines.append("    AMMO: N/A")
+        unit_lines.append(f"    MP:{render_progress_bar(u.movement_points, u.movement, 4)}")
         unit_lines.append("")
     while len(unit_lines) < 15:
         unit_lines.append("")
