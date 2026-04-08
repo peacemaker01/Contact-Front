@@ -2,8 +2,6 @@
 
 **Contact Front** is a terminal‑based, LLM‑powered wargame for **Termux** (Android) and any Unix‑like system. You command modern military forces in **tactical** (company‑level) or **strategic** (theater‑level) scenarios using **natural language** – no menus, no clicks, just type your orders.
 
-![Screenshot](https://via.placeholder.com/800x400?text=Contact+Front+in+Termux)  
-*(Replace with actual screenshot)*
 
 ---
 
