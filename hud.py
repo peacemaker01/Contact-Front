@@ -64,6 +64,25 @@ def _build_strategic_asset_lines(game_state):
             lines.append(f"  {capital}: {count}")
     return lines or [" No assets remaining."]
 
+def _targetable_enemies(unit, game_state):
+    """Return a formatted string of enemies that unit can target."""
+    if unit.range_tiles <= 0:
+        return "none (no weapon)"
+    targetable = []
+    for enemy in game_state.enemy_units:
+        if enemy.destroyed:
+            continue
+        if not line_of_sight_any(game_state, enemy.x, enemy.y):
+            continue
+        dist = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
+        if dist <= unit.range_tiles:
+            targetable.append(f"{enemy.type_code}{enemy.id}({enemy.x},{enemy.y})")
+    if not targetable:
+        return "none"
+    # Truncate to avoid overflow
+    result = ", ".join(targetable)
+    return result[:30] + "..." if len(result) > 30 else result
+
 def render_full_tactical_hud(game_state, map_render):
     clear_screen()
     term = TerminalInfo()
@@ -97,7 +116,6 @@ def render_full_tactical_hud(game_state, map_render):
         unit_lines.append(f"[{u.id}] {u.type_code}{u.id} ({u.x},{u.y}) | {u.name[:18]}")
         unit_lines.append(f"    STR:{render_progress_bar(u.strength, 100, 6)}")
         unit_lines.append(f"    MOR:{render_progress_bar(u.morale, 100, 6)}")
-        # Combined ammo (HE + AP) for simplicity
         total_ammo = u.ammo_he + u.ammo_ap
         total_max = u.max_ammo_he + u.max_ammo_ap
         if total_max > 0:
@@ -105,6 +123,9 @@ def render_full_tactical_hud(game_state, map_render):
         else:
             unit_lines.append("    AMMO: N/A")
         unit_lines.append(f"    MP:{render_progress_bar(u.movement_points, u.movement, 4)}")
+        # Add targetable enemies line
+        targets = _targetable_enemies(u, game_state)
+        unit_lines.append(f"    TARGETS: {targets}")
         unit_lines.append("")
     while len(unit_lines) < 15:
         unit_lines.append("")
