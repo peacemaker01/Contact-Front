@@ -1,0 +1,34 @@
+# Environment
+.env
+.env.*
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+.Python
+venv/
+.venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs & data
+*.log
+*.sqlite
+*.db
+saves/
+
+# Temporary files
+*.tmp
+*.bak
+newach/

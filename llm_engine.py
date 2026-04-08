@@ -1,6 +1,9 @@
 import json
 import time
 import requests
+import threading
+import itertools
+import sys
 from config import OPENROUTER_CONFIG
 
 FALLBACK_RESPONSE = '{"action_type": "hold", "unit_id": 1, "target_tile": null, "target_unit_id": null, "parameters": {}, "narrative_reason": "Fallback due to LLM error"}'
@@ -13,6 +16,7 @@ class LLMEngine:
 
     def _call(self, messages, temperature=None):
         if not self.api_key:
+            print("[LLM] No API key – using fallback.")
             return FALLBACK_RESPONSE
         payload = {
             "model": self.model,
@@ -25,20 +29,38 @@ class LLMEngine:
             "Content-Type": "application/json",
             **OPENROUTER_CONFIG["headers"]
         }
-        for attempt in range(3):
-            try:
-                resp = requests.post(self.base_url, json=payload, headers=headers, timeout=OPENROUTER_CONFIG["timeout"])
-                resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"]
-                if content.startswith("```json"):
-                    content = content[7:]
-                if content.endswith("```"):
-                    content = content[:-3]
-                return content.strip()
-            except Exception as e:
-                print(f"[LLM] Attempt {attempt+1} failed: {e}")
-                time.sleep(1)
-        return FALLBACK_RESPONSE
+        stop_event = threading.Event()
+        def spin():
+            for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
+                if stop_event.is_set():
+                    break
+                sys.stdout.write(f"\r  {ch} Contacting LLM…")
+                sys.stdout.flush()
+                time.sleep(0.1)
+            sys.stdout.write("\r" + " " * 20 + "\r")
+            sys.stdout.flush()
+        spinner = threading.Thread(target=spin, daemon=True)
+        spinner.start()
+        try:
+            for attempt in range(3):
+                try:
+                    resp = requests.post(self.base_url, json=payload, headers=headers, timeout=OPENROUTER_CONFIG["timeout"])
+                    resp.raise_for_status()
+                    content = resp.json()["choices"][0]["message"]["content"]
+                    if content is None:
+                        continue
+                    if content.startswith("```json"):
+                        content = content[7:]
+                    if content.endswith("```"):
+                        content = content[:-3]
+                    return content.strip()
+                except Exception as e:
+                    print(f"\n[LLM] Attempt {attempt+1} failed: {e}")
+                    time.sleep(1)
+            return FALLBACK_RESPONSE
+        finally:
+            stop_event.set()
+            spinner.join()
 
     def parse_tactical_command(self, player_input, game_state_summary, faction):
         system_prompt = f"""You are a military command interpreter for CONTACT FRONT.
@@ -61,6 +83,8 @@ Player command: "{player_input}"
 """
         messages = [{"role": "system", "content": system_prompt}]
         resp = self._call(messages, temperature=0.2)
+        if not resp:
+            return None
         try:
             action = json.loads(resp)
             if action.get("action_type") not in ["move","fire","suppress","call_arty","recon","deploy_recon_drone","fpv_attack","hold"]:
@@ -74,10 +98,12 @@ Player command: "{player_input}"
 Current state: {json.dumps(game_state_summary, indent=2)}
 You may issue one action per enemy unit. Output a JSON list of actions (same schema as parse_tactical_command).
 If a unit should not act, use "hold".
-Think tactically. Output ONLY valid JSON. No extra text.
+Think tactically: move, fire, use cover, etc. Output ONLY valid JSON.
 """
         messages = [{"role": "system", "content": system_prompt}]
         resp = self._call(messages, temperature=0.6)
+        if not resp:
+            return []
         try:
             if resp.startswith("```json"):
                 resp = resp[7:]
@@ -108,6 +134,8 @@ Be creative but realistic. Output ONLY valid JSON.
 """
         messages = [{"role": "user", "content": prompt}]
         resp = self._call(messages, temperature=0.7)
+        if not resp:
+            return None
         try:
             if resp.startswith("```json"):
                 resp = resp[7:]

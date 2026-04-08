@@ -12,23 +12,36 @@ class Unit:
     y: int
     strength: float
     morale: float
-    ammo: int
-    max_ammo: int
+    ammo_he: int          # High Explosive (anti‑infantry)
+    ammo_ap: int          # Armor Piercing (anti‑vehicle)
+    max_ammo_he: int
+    max_ammo_ap: int
     armor: int
     movement: int
     movement_points: int
     accuracy_base: int
     suppress_threshold: int
     emoji: str
+    range_tiles: int = 15
     destroyed: bool = False
     suppressed: bool = False
+    last_seen_by_player: int = 0
+    turns_without_ammo: int = 0
+    is_routed: bool = False
+    # NEW: vehicle damage states
+    mobility_kill: bool = False
+    firepower_kill: bool = False
+    # NEW: radio & command delay
+    radio_range: int = 10   # tiles within which orders are instant
+    order_delay_turns: int = 0  # turns remaining before order executes
 
     def to_summary(self):
         return {
             "id": self.id, "name": self.name, "type": self.type,
             "type_code": self.type_code, "x": self.x, "y": self.y,
             "strength": self.strength, "morale": self.morale,
-            "ammo": self.ammo, "destroyed": self.destroyed
+            "ammo_he": self.ammo_he, "ammo_ap": self.ammo_ap,
+            "destroyed": self.destroyed
         }
 
 @dataclass
@@ -51,7 +64,7 @@ class TacticalGameState:
     friendly_units: List[Unit]
     enemy_units: List[Unit]
     artillery_fires_remaining: int
-    cas_available: bool
+    cas_available: int
     smoke_grenades: int
     objectives: List[Dict]
     action_log: List[str]
@@ -60,6 +73,16 @@ class TacticalGameState:
     friendly_wia: int = 0
     vehicles_lost: int = 0
     enemy_kia: int = 0
+    is_night: bool = False
+    is_raining: bool = False
+    ew_gps_jammed: bool = False
+    ew_comms_jammed: bool = False
+    enemy_artillery_fires_remaining: int = 3
+    enemy_cas_available: int = 2
+    # NEW: delayed orders (queue)
+    delayed_orders: List[Dict] = field(default_factory=list)  # each: {"action": action, "execution_turn": int, "unit_id": int}
+    # NEW: supply depots (coordinates of ammo caches)
+    supply_depots: List[tuple] = field(default_factory=list)
     game_over: bool = False
     victory: Optional[bool] = None
 

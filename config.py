@@ -14,7 +14,7 @@ else:
 OPENROUTER_CONFIG = {
     "base_url": "https://openrouter.ai/api/v1/chat/completions",
     "api_key": api_key,
-    "model": "deepseek/deepseek-v3.2",
+    "model": "deepseek/deepseek-v3.2",  # free model, no credits needed
     "fallback_model": "meta-llama/llama-3-8b-instruct",
     "headers": {
         "HTTP-Referer": "https://contact-front.local",
@@ -33,4 +33,4 @@ elif provider == "claude" and api_key:
     OPENROUTER_CONFIG["model"] = "anthropic/claude-3-haiku-20240307"
 
 GAME_NAME = "CONTACT FRONT"
-VERSION = "1.0"
+VERSION = "1.6"

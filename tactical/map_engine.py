@@ -1,27 +1,29 @@
 import random
 from game_state import Tile
 
-# Terrain definitions with very low movement costs
+# Terrain definitions
 TERRAIN = {
-    '.': (".", None, 0, 0.1, "open"),
-    'T': ("🌲", "🌲", 35, 0.2, "forest"),
-    'H': ("⛰️", "⛰️", 20, 0.2, "hill"),
-    'B': ("🏚️", "🏚️", 50, 0.15, "ruin"),
-    'U': ("🏢", "🏢", 60, 0.2, "building"),
-    'R': ("-", None, 0, 0.05, "road_horiz"),
-    'R|': ("|", None, 0, 0.05, "road_vert"),
-    'R+': ("+", None, 0, 0.05, "road_cross"),
+    '.': (".", None, 0, 1.0, "open"),
+    'T': ("🌲", "🌲", 35, 2.0, "forest"),
+    'H': ("⛰️", "⛰️", 20, 2.0, "hill"),
+    'B': ("🏚️", "🏚️", 50, 1.5, "ruin"),
+    'U': ("🏢", "🏢", 60, 2.0, "building"),
+    'R': ("-", None, 0, 0.5, "road_horiz"),
+    'R|': ("|", None, 0, 0.5, "road_vert"),
+    'R+': ("+", None, 0, 0.5, "road_cross"),
     'W': ("~", None, 0, 999, "water"),
-    '~': ("~", None, 0, 0.5, "ford"),
-    'C': ("+", None, 40, 0.2, "checkpoint"),
-    'X': ("X", "💥", 25, 0.1, "crater"),
-    'O': ("★", "★", 10, 0.05, "objective"),
-    'F': ("#", "🔥", -10, 0.2, "fire"),
-    'M': ("M", "💣", 0, 0.3, "minefield")
+    '~': ("~", None, 0, 3.0, "ford"),
+    'C': ("+", None, 40, 3.0, "checkpoint"),
+    'X': ("X", "💥", 25, 1.5, "crater"),
+    'O': ("★", "★", 10, 1.0, "objective"),
+    'F': ("#", "🔥", -10, 2.0, "fire"),
+    'M': ("M", "💣", 0, 1.0, "minefield")
 }
 
 def generate_tactical_map(width=50, height=14):
+    """Generate a tactical map grid and objective coordinates."""
     grid = [[None for _ in range(width)] for __ in range(height)]
+    # Initialize with open ground
     for y in range(height):
         for x in range(width):
             grid[y][x] = Tile(type='.', emoji=TERRAIN['.'][0],
@@ -35,20 +37,21 @@ def generate_tactical_map(width=50, height=14):
     for y in range(road_y, height-3):
         grid[y][width-7] = Tile(type='R|', emoji=TERRAIN['R|'][0],
                                 cover_bonus=TERRAIN['R|'][2], movement_cost=TERRAIN['R|'][3])
-    # Scatter buildings
-    for _ in range(20):
+    # Scatter buildings (20% of map)
+    for _ in range(max(10, width // 5)):
         bx = random.randint(4, width-4)
         by = random.randint(2, height-3)
+        # Avoid placing on roads
         if not (by == road_y and 5 <= bx <= width-5) and not (bx == width-7 and by >= road_y):
             grid[by][bx] = Tile(type='U', emoji=TERRAIN['U'][1],
                                 cover_bonus=TERRAIN['U'][2], movement_cost=TERRAIN['U'][3])
-    # Forest patches
+    # Forest patches on edges
     for y in range(2, height-2):
         for x in [1, 2, width-3, width-2]:
             if random.random() > 0.3:
                 grid[y][x] = Tile(type='T', emoji=TERRAIN['T'][1],
                                   cover_bonus=TERRAIN['T'][2], movement_cost=TERRAIN['T'][3])
-    # River
+    # River (water obstacle)
     river_y = road_y + 3
     for x in range(8, 14):
         grid[river_y][x] = Tile(type='W', emoji=TERRAIN['W'][0],
@@ -66,9 +69,11 @@ def line_of_sight(x0, y0, x1, y1, grid):
     sy = 1 if y0 < y1 else -1
     err = dx - dy
     x, y = x0, y0
+    first = True
     while (x, y) != (x1, y1):
-        if grid[y][x].type in ('U', 'B', 'H', 'T'):
+        if not first and grid[y][x].type in ('U', 'B', 'H', 'T'):
             return False
+        first = False
         e2 = 2 * err
         if e2 > -dy:
             err -= dy
@@ -94,6 +99,7 @@ def render_ascii_map(game_state, fog_of_war=True):
     ANSI_GREEN = "\033[92m"
     ANSI_RED = "\033[91m"
     ANSI_RESET = "\033[0m"
+    current_turn = game_state.turn
 
     lines = []
     # Column header (every 5 columns)
@@ -117,12 +123,15 @@ def render_ascii_map(game_state, fog_of_war=True):
                 if unit.suppressed:
                     marker += "!"
                 line += f"{ANSI_GREEN}{marker}{ANSI_RESET}"
-            elif (x, y) in enemy_pos and (not fog_of_war or line_of_sight_any(game_state, x, y)):
-                unit = enemy_pos[(x, y)]
-                marker = f"{unit.type_code}{unit.id}"
-                line += f"{ANSI_RED}{marker}{ANSI_RESET}"
-            elif (x, y) in enemy_pos and fog_of_war:
-                line += f"{ANSI_RED}??{ANSI_RESET}"
+            elif (x, y) in enemy_pos:
+                enemy = enemy_pos[(x, y)]
+                visible = line_of_sight_any(game_state, x, y) or (enemy.last_seen_by_player == current_turn)
+                if visible:
+                    line += f"{ANSI_RED}{enemy.type_code}{enemy.id}{ANSI_RESET}"
+                elif current_turn - enemy.last_seen_by_player <= 2:
+                    line += f"{ANSI_RED}??{ANSI_RESET}"
+                else:
+                    line += "  "
             else:
                 tile = grid[y][x]
                 if tile.emoji in ["🌲", "⛰️", "🏚️", "🏢", "★", "🔥", "💣"]:
@@ -135,5 +144,5 @@ def render_ascii_map(game_state, fog_of_war=True):
 
     legend = "  Units: R=Rifle T=Tank I=IFV H=Helo A=Arty D=Drone K=Kamikaze P=Proxy S=SAM  Green=Friend Red=Enemy  ! = Suppressed"
     lines.append(legend)
-    lines.append("  Coordinates: Column numbers at top (every 5), row numbers on left. Use 'move T2 3 east' for relative movement.")
+    lines.append("  Coordinates: Column numbers every 5. Use 'move T2 3 east' for relative movement.")
     return "\n".join(lines)

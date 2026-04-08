@@ -2,12 +2,23 @@ import random
 from game_state import Unit
 from factions import FACTIONS
 
+# Ammo consumption per shot (no longer used directly, but kept for reference)
+AMMO_PER_SHOT = {
+    "R": (30, 0),   # (HE, AP)
+    "T": (1, 1),
+    "I": (5, 5),
+    "H": (2, 2),
+    "A": (3, 0),
+    "K": (1, 0),
+    "D": (0, 0),
+    "P": (20, 0)
+}
+
 def create_units_for_faction(faction_name, side, start_positions, unit_types=None):
     faction = FACTIONS[faction_name]
     units = []
     if not unit_types:
         available_types = list(faction["unit_templates"].keys())
-        # Exclude drones from default selection (added separately)
         available_types = [t for t in available_types if t not in ["recon_drone", "fpv_kamikaze"]]
         unit_types = available_types[:len(start_positions)]
         while len(unit_types) < len(start_positions):
@@ -28,57 +39,80 @@ def create_units_for_faction(faction_name, side, start_positions, unit_types=Non
         unit = Unit(
             id=i+1, name=full_name, type=template_key, type_code=template["type_code"],
             faction=faction_name, x=x, y=y, strength=100, morale=template["base_morale"],
-            ammo=template["ammo"], max_ammo=template["ammo"], armor=template["armor"],
+            ammo_he=template["ammo_he"], ammo_ap=template["ammo_ap"],
+            max_ammo_he=template["ammo_he"], max_ammo_ap=template["ammo_ap"],
+            armor=template["armor"],
             movement=template["movement"], movement_points=template["movement"],
             accuracy_base=template["accuracy_base"] + faction["accuracy_bonus"],
-            suppress_threshold=template["suppress_threshold"], emoji=template["emoji"]
+            suppress_threshold=template["suppress_threshold"], emoji=template["emoji"],
+            range_tiles=template.get("range_tiles", 15),
+            radio_range=10  # default
         )
         units.append(unit)
 
-    # Add recon drone and FPV drone as separate units
+    # Add recon drone and FPV drone – offset spawn
     drone_templates = ["recon_drone", "fpv_kamikaze"]
     next_id = len(units) + 1
-    for dt in drone_templates:
+    for idx, dt in enumerate(drone_templates):
         if dt in faction["unit_templates"]:
             template = faction["unit_templates"][dt]
-            start_x, start_y = start_positions[0] if start_positions else (0,0)
+            start_x = start_positions[0][0]
+            start_y = max(0, start_positions[0][1] - 1 - idx)
             drone = Unit(
                 id=next_id, name=f"{dt.replace('_',' ').title()}", type=dt, type_code=template["type_code"],
                 faction=faction_name, x=start_x, y=start_y, strength=100, morale=100,
-                ammo=template["ammo"], max_ammo=template["ammo"], armor=0,
+                ammo_he=template["ammo_he"], ammo_ap=template["ammo_ap"],
+                max_ammo_he=template["ammo_he"], max_ammo_ap=template["ammo_ap"],
+                armor=0,
                 movement=template["movement"], movement_points=template["movement"],
                 accuracy_base=template["accuracy_base"], suppress_threshold=0,
-                emoji=template["emoji"]
+                emoji=template["emoji"], range_tiles=template.get("range_tiles", 0),
+                radio_range=10
             )
             units.append(drone)
             next_id += 1
-
     return units
 
 def resolve_fire(attacker, target, terrain_cover, action_type, game_state):
-    hit_chance = attacker.accuracy_base - terrain_cover + random.randint(-10,10)
+    faction_bonus = FACTIONS.get(attacker.faction, {}).get("accuracy_bonus", 0)
+    hit_chance = attacker.accuracy_base + faction_bonus - terrain_cover + random.randint(-10,10)
     hit = random.randint(1,100) <= hit_chance
     damage = 0
     was_destroyed = False
     if hit:
-        damage = random.uniform(15, 35) * (1 - target.armor/100)
-        target.strength -= damage
-        target.morale -= damage * 0.5
-        # Track WIA (non-fatal damage)
-        if target.strength > 0 and target.faction == game_state.player_faction:
-            game_state.friendly_wia += 1
+        # Use appropriate ammo type – already handled in tactical_game.py, but here for fallback
+        is_armored = target.armor > 50
+        if is_armored:
+            ammo_cost_ap = 1
+            if attacker.ammo_ap >= ammo_cost_ap:
+                attacker.ammo_ap -= ammo_cost_ap
+                damage_mult = 1.2
+            else:
+                hit = False
+                damage = 0
+        else:
+            ammo_cost_he = 30 if attacker.type_code == 'R' else 1
+            if attacker.ammo_he >= ammo_cost_he:
+                attacker.ammo_he -= ammo_cost_he
+                damage_mult = 0.8
+            else:
+                hit = False
+                damage = 0
+        if hit:
+            damage = random.uniform(15, 35) * damage_mult * (1 - target.armor/100)
+            target.strength -= damage
+            target.morale -= damage * 0.5
+            if target.strength > 0 and target.faction == game_state.player_faction:
+                game_state.friendly_wia += 1
     else:
         target.morale -= 5
-    attacker.ammo -= 5
     if target.morale <= attacker.suppress_threshold:
         target.suppressed = True
     if target.strength <= 0 and not target.destroyed:
         target.destroyed = True
         was_destroyed = True
-        # Update casualties based on target's side
         if target.faction == game_state.player_faction:
             game_state.friendly_kia += 1
-            # Check if vehicle
             if target.type in ["m1a2_tank", "t90m_tank", "bradley_ifv", "bmp3_ifv", "type99a_tank", "t72s_tank"]:
                 game_state.vehicles_lost += 1
         else:
@@ -99,3 +133,32 @@ def resolve_artillery(battery, target_tile, rounds, game_state, cep_meters=50):
                 unit.destroyed = True
                 game_state.enemy_kia += 1
     return {"assets_launched": rounds, "damage_pct": 30, "impact_tile": (actual_x, actual_y)}
+
+def check_rout(unit, game_state):
+    if unit.morale <= 15 and not unit.destroyed and not unit.is_routed:
+        unit.is_routed = True
+        min_dist = float('inf')
+        nearest = None
+        for enemy in game_state.enemy_units:
+            if enemy.destroyed: continue
+            d = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
+            if d < min_dist:
+                min_dist = d
+                nearest = enemy
+        if nearest:
+            dx = unit.x - nearest.x
+            dy = unit.y - nearest.y
+            if dx != 0: dx = dx // abs(dx)
+            if dy != 0: dy = dy // abs(dy)
+            new_x = unit.x + dx * 3
+            new_y = unit.y + dy * 3
+            new_x = max(0, min(new_x, len(game_state.map_grid[0])-1))
+            new_y = max(0, min(new_y, len(game_state.map_grid)-1))
+            unit.x, unit.y = new_x, new_y
+        unit.suppressed = True
+        return True
+    return False
+
+def apply_ew_effects(game_state):
+    # Placeholder for EW effects
+    pass
