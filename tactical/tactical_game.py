@@ -1,5 +1,5 @@
 from factions import FACTIONS
-from tactical.map_engine import generate_tactical_map, render_ascii_map, line_of_sight_any
+from tactical.map_engine import generate_tactical_map, render_ascii_map, line_of_sight, line_of_sight_any
 from tactical.unit_manager import create_units_for_faction, resolve_fire, resolve_artillery, check_rout, apply_ew_effects
 from tactical.command_parser import CommandParser
 from tactical.objective import check_objectives
@@ -10,7 +10,6 @@ from game_state import TacticalGameState
 from terminal_utils import TerminalInfo
 import random
 import sys
-import math
 
 class TacticalGame:
     def __init__(self, player_faction, submode, difficulty):
@@ -21,6 +20,7 @@ class TacticalGame:
         self.parser = CommandParser(self.llm)
         self.scenario_gen = ScenarioGenerator(self.llm)
         self.state = None
+        self.term = TerminalInfo()
         self._init_game()
 
     def _init_game(self):
@@ -28,8 +28,7 @@ class TacticalGame:
         enemy_faction = briefing.get("enemy_faction", "RUSSIA")
         if enemy_faction not in FACTIONS:
             enemy_faction = "RUSSIA" if self.player_faction != "RUSSIA" else "USA"
-        term = TerminalInfo()
-        map_w, map_h = term.get_map_size()
+        map_w, map_h = self.term.get_map_size()
         map_grid, obj_coords = generate_tactical_map(width=map_w, height=map_h)
         if self.submode == "attacker":
             start_pos = [(3, y) for y in range(3, map_h - 2, 3)]
@@ -41,7 +40,6 @@ class TacticalGame:
         enemy = create_units_for_faction(enemy_faction, "ENEMY", enemy_pos)
         is_night = random.random() < 0.2
         is_raining = random.random() < 0.15
-        # Place supply depot near player start
         supply_depots = [(start_pos[0][0] + 2, start_pos[0][1])]
         self.state = TacticalGameState(
             turn=1, max_turns=briefing.get("time_limit_turns", 10), mode=self.submode,
@@ -59,8 +57,8 @@ class TacticalGame:
     def run(self):
         try:
             while not self.state.game_over:
-                # Process delayed orders (C2)
-                self._process_delayed_orders()
+                if self.term.refresh():
+                    self._resize_map()
                 render_full_tactical_hud(self.state, render_ascii_map(self.state))
                 print(f"{ANSI['TITLE']}> {ANSI['RESET']}", end="", flush=True)
                 cmd = input().strip()
@@ -72,12 +70,10 @@ class TacticalGame:
                 if not action:
                     self._log(f"Command not understood: '{cmd}'")
                     continue
-                # Check radio range for order delay
                 unit_id = action.get("unit_id", 0)
                 if unit_id != 0:
                     unit = next((u for u in self.state.friendly_units if u.id == unit_id and not u.destroyed), None)
                     if unit:
-                        # Find commander (unit ID 1) as HQ
                         commander = next((u for u in self.state.friendly_units if u.id == 1 and not u.destroyed), None)
                         if commander:
                             dist = abs(unit.x - commander.x) + abs(unit.y - commander.y)
@@ -89,10 +85,10 @@ class TacticalGame:
                                     "execution_turn": self.state.turn + unit.order_delay_turns,
                                     "unit_id": unit_id
                                 })
-                                continue  # do not execute now
-                # If no delay, execute immediately
+                                continue
                 turn_consumed = self._resolve_action(action, immediate=True)
                 if turn_consumed and not self.state.game_over:
+                    self._process_delayed_orders()
                     self._ai_turn()
                     if self.state.turn % 5 == 0:
                         self._resupply()
@@ -106,7 +102,6 @@ class TacticalGame:
         self._end_game()
 
     def _process_delayed_orders(self):
-        """Execute orders whose execution turn has arrived."""
         remaining = []
         for order in self.state.delayed_orders:
             if order["execution_turn"] <= self.state.turn:
@@ -114,10 +109,28 @@ class TacticalGame:
                 if unit:
                     self._log(f"Executing delayed order for {unit.name}.")
                     self._resolve_action(order["action"], immediate=True)
-                # else unit dead, order lost
             else:
                 remaining.append(order)
         self.state.delayed_orders = remaining
+
+    def _resize_map(self):
+        old_width = len(self.state.map_grid[0])
+        old_height = len(self.state.map_grid)
+        new_width, new_height = self.term.get_map_size()
+        if new_width == old_width and new_height == old_height:
+            return
+        new_grid, new_obj_coords = generate_tactical_map(width=new_width, height=new_height)
+        self.state.objectives[0]["coords"] = new_obj_coords
+        for unit in self.state.friendly_units + self.state.enemy_units:
+            if unit.destroyed:
+                continue
+            old_x, old_y = unit.x, unit.y
+            new_x = int(old_x * new_width / old_width)
+            new_y = int(old_y * new_height / old_height)
+            unit.x = max(0, min(new_x, new_width - 1))
+            unit.y = max(0, min(new_y, new_height - 1))
+        self.state.map_grid = new_grid
+        self._log(f"Terminal resized: map now {new_width}x{new_height}.")
 
     def _resolve_action(self, action, immediate=False) -> bool:
         unit = None
@@ -151,8 +164,38 @@ class TacticalGame:
             self._log(f"{unit.name} moves to ({tx},{ty}). {unit.movement_points:.0f} MP left.")
             return True
 
-        # ----- FIRE / SUPPRESS with ammo types -----
+        # ----- FIRE / SUPPRESS (including area fire at coordinates) -----
         if act in ["fire", "suppress"]:
+            # Area fire at coordinates
+            if action.get("target_tile") and action["target_unit_id"] is None:
+                tx, ty = action["target_tile"]
+                if not (0 <= tx < len(self.state.map_grid[0]) and 0 <= ty < len(self.state.map_grid)):
+                    self._log(f"Target coordinates ({tx},{ty}) out of bounds.")
+                    return False
+                # Use artillery scatter for area fire
+                cep = 50
+                if unit.type_code == 'A':
+                    cep = 50
+                # Resolve area fire (damage within 2 tiles)
+                result = resolve_artillery(unit, (tx, ty), 1, self.state, cep)
+                self._log(f"{unit.name} fires at ({tx},{ty}) – impact at {result['impact_tile']}.")
+                # Friendly fire
+                for friend in self.state.friendly_units:
+                    if friend.destroyed or friend == unit:
+                        continue
+                    if abs(friend.x - result["impact_tile"][0]) <= 2 and abs(friend.y - result["impact_tile"][1]) <= 2:
+                        dmg = random.uniform(10, 20)
+                        friend.strength -= dmg
+                        self._log(f"FRIENDLY FIRE: {unit.name} hits {friend.name} for {dmg:.0f} damage!")
+                        if friend.strength <= 0:
+                            friend.destroyed = True
+                            self.state.friendly_kia += 1
+                # Reduce ammo (artillery consumes 1 HE)
+                if unit.type_code == 'A' and unit.ammo_he > 0:
+                    unit.ammo_he -= 1
+                return True
+
+            # Direct fire at enemy unit
             target_id = action.get("target_unit_id")
             target = next((u for u in self.state.enemy_units if u.id == target_id and not u.destroyed), None)
             if not target:
@@ -163,7 +206,29 @@ class TacticalGame:
             if dist > max_range:
                 self._log(f"Target out of range ({dist} tiles, max {max_range}).")
                 return False
-            # Choose ammo type based on target (AP for armored, HE for infantry)
+
+            # Check line of sight
+            has_los = line_of_sight_any(self.state, target.x, target.y, max_range=20)
+            is_artillery = (unit.type_code == 'A')
+            spotter_available = False
+
+            if is_artillery and not has_los:
+                for spotter in self.state.friendly_units:
+                    if spotter.destroyed or not spotter.is_spotter:
+                        continue
+                    spotter_dist = abs(spotter.x - target.x) + abs(spotter.y - target.y)
+                    if spotter_dist <= 20 and line_of_sight(spotter.x, spotter.y, target.x, target.y, self.state.map_grid):
+                        spotter_available = True
+                        break
+                if spotter_available:
+                    self._log(f"{unit.name} fires indirectly with spotter assistance.")
+                else:
+                    self._log(f"{unit.name} fires indirectly without spotter – accuracy reduced.")
+            elif not has_los and not is_artillery:
+                self._log(f"No line of sight to target.")
+                return False
+
+            # Choose ammo type
             is_armored = target.armor > 50
             if is_armored:
                 if unit.ammo_ap <= 0:
@@ -179,6 +244,8 @@ class TacticalGame:
                 ammo_type = "HE"
                 unit.ammo_he -= 1
                 damage_mult = 0.8
+
+            # Modifiers
             penalty = 0
             if self.state.is_night:
                 penalty += 20
@@ -186,28 +253,56 @@ class TacticalGame:
                 penalty += 10
             if self.state.enemy_faction == "RUSSIA" and random.random() < 0.3:
                 penalty += 15
+
+            cep = 50
+            if is_artillery and not has_los:
+                if not spotter_available:
+                    penalty += 20
+                    cep = 100
+
             tile = self.state.map_grid[target.y][target.x]
             hit_chance = unit.accuracy_base - tile.cover_bonus - penalty + random.randint(-10,10)
             hit = random.randint(1,100) <= hit_chance
+
             if hit:
                 base_damage = random.uniform(15, 35) * damage_mult
-                damage = base_damage * (1 - target.armor/100)
-                target.strength -= damage
-                target.morale -= damage * 0.5
-                # Vehicle damage states
-                if target.armor > 0:
-                    if not target.mobility_kill and random.random() < 0.3:
-                        target.mobility_kill = True
-                        self._log(f"{target.name} mobility killed! (movement halved)")
-                        target.movement = max(1, target.movement // 2)
-                    if not target.firepower_kill and random.random() < 0.2:
-                        target.firepower_kill = True
-                        self._log(f"{target.name} firepower killed! (accuracy -50)")
-                        target.accuracy_base = max(0, target.accuracy_base - 50)
-                if target.strength > 0 and target.faction == self.state.player_faction:
+                if is_artillery and not has_los:
+                    scatter_x = int(random.gauss(0, cep / 50))
+                    scatter_y = int(random.gauss(0, cep / 50))
+                    actual_x = target.x + scatter_x
+                    actual_y = target.y + scatter_y
+                    actual_x = max(0, min(actual_x, len(self.state.map_grid[0])-1))
+                    actual_y = max(0, min(actual_y, len(self.state.map_grid)-1))
+                    if (actual_x, actual_y) != (target.x, target.y):
+                        self._log(f"Shell scatters to ({actual_x},{actual_y}).")
+                    if abs(actual_x - target.x) <= 1 and abs(actual_y - target.y) <= 1:
+                        damage = base_damage * (1 - target.armor/100)
+                        target.strength -= damage
+                        target.morale -= damage * 0.5
+                    else:
+                        damage = 0
+                        self._log(f"Shell misses due to scatter.")
+                else:
+                    damage = base_damage * (1 - target.armor/100)
+                    target.strength -= damage
+                    target.morale -= damage * 0.5
+
+                if damage > 0 and target.strength > 0 and target.faction == self.state.player_faction:
                     self.state.friendly_wia += 1
+
+                if hit and (not is_artillery or (is_artillery and has_los and (actual_x, actual_y) == (target.x, target.y))):
+                    if target.armor > 0:
+                        if not target.mobility_kill and random.random() < 0.3:
+                            target.mobility_kill = True
+                            self._log(f"{target.name} mobility killed! (movement halved)")
+                            target.movement = max(1, target.movement // 2)
+                        if not target.firepower_kill and random.random() < 0.2:
+                            target.firepower_kill = True
+                            self._log(f"{target.name} firepower killed! (accuracy -50)")
+                            target.accuracy_base = max(0, target.accuracy_base - 50)
             else:
                 target.morale -= 5
+
             if target.morale <= unit.suppress_threshold:
                 target.suppressed = True
             if target.strength <= 0 and not target.destroyed:
@@ -223,7 +318,7 @@ class TacticalGame:
                 self._log(f"{target.name} panics and routs!")
             return True
 
-        # ----- ARTILLERY (with delay and friendly fire) -----
+        # ----- ARTILLERY (off‑map) with delay and friendly fire -----
         if act == "call_arty" and self.state.artillery_fires_remaining > 0:
             if not immediate:
                 self._log("Artillery strike scheduled for next turn.")
@@ -242,7 +337,6 @@ class TacticalGame:
             if self.state.ew_gps_jammed:
                 cep = 100
             result = resolve_artillery(None, target_tile, 4, self.state, cep)
-            # Friendly fire: damage any friendly units in blast radius
             for friend in self.state.friendly_units:
                 if friend.destroyed:
                     continue
@@ -256,7 +350,7 @@ class TacticalGame:
             self._log(f"Artillery strike at {target_tile} – scatter to {result['impact_tile']}.")
             return True
 
-        # ----- CAS (with delay and friendly fire) -----
+        # ----- CAS (off‑map) with delay and friendly fire -----
         if act == "call_cas" and self.state.cas_available > 0:
             if not immediate:
                 self._log("CAS strike scheduled for next turn.")
@@ -271,7 +365,6 @@ class TacticalGame:
             if not target_tile:
                 self._log("No target tile for CAS.")
                 return False
-            # Friendly fire
             for friend in self.state.friendly_units:
                 if friend.destroyed:
                     continue
@@ -289,7 +382,6 @@ class TacticalGame:
         if act == "deploy_recon_drone":
             self._apply_recon_reveal(unit, action["parameters"].get("radius", 5))
             return True
-
         if act == "recon":
             self._apply_recon_reveal(unit, action["parameters"].get("radius", 3))
             return True
@@ -340,14 +432,13 @@ class TacticalGame:
             dist = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
             if dist <= radius:
                 enemy.last_seen_by_player = self.state.turn
-                revealed.append(f"{enemy.type_code}{enemy.id} at ({enemy.x},{enemy.y})")
+                revealed.append(f"E{enemy.type_code}{enemy.id} at ({enemy.x},{enemy.y})")
         if revealed:
             self._log(f"Recon reveals: {', '.join(revealed)}")
         else:
             self._log("Recon finds nothing.")
 
     def _resupply(self):
-        # Logistics: resupply from depots within 5 tiles
         for depot in self.state.supply_depots:
             for unit in self.state.friendly_units:
                 if unit.destroyed:
@@ -379,14 +470,10 @@ class TacticalGame:
             self.state.narrative_log = self.state.narrative_log[-50:]
 
     def _ai_turn(self):
-        # Determine AI goal
         objective_tile = self.state.objectives[0]["coords"] if self.state.objectives else None
         player_is_attacker = (self.state.mode == "attacker")
-
-        # --- Enemy artillery and CAS usage (with delay) ---
         player_positions = [(u.x, u.y) for u in self.state.friendly_units if not u.destroyed]
         if player_positions:
-            # Find cluster center
             cluster_center = None
             best_count = 0
             for (x, y) in player_positions:
@@ -394,17 +481,14 @@ class TacticalGame:
                 if count > best_count:
                     best_count = count
                     cluster_center = (x, y)
-            # Artillery on clusters (with delay)
             if self.state.enemy_artillery_fires_remaining > 0 and best_count >= 2:
                 self.state.enemy_artillery_fires_remaining -= 1
-                # Schedule for next turn
                 self.state.delayed_orders.append({
                     "action": {"action_type": "call_arty", "target_tile": cluster_center},
                     "execution_turn": self.state.turn + 1,
                     "unit_id": 0
                 })
                 self._log("Enemy artillery scheduled for next turn.")
-            # CAS
             if self.state.enemy_cas_available > 0 and best_count >= 1:
                 self.state.enemy_cas_available -= 1
                 self.state.delayed_orders.append({
@@ -414,12 +498,9 @@ class TacticalGame:
                 })
                 self._log("Enemy CAS scheduled for next turn.")
 
-        # --- Move and fire for each enemy unit ---
         for enemy in self.state.enemy_units:
             if enemy.destroyed or enemy.is_routed:
                 continue
-
-            # Kamikaze drones
             if enemy.type_code == 'K':
                 closest = None
                 min_dist = float('inf')
@@ -434,7 +515,6 @@ class TacticalGame:
                     self._fpv_attack(enemy, closest)
                     continue
 
-            # Decide movement target
             if player_is_attacker and objective_tile:
                 target_x, target_y = objective_tile
             else:
@@ -452,18 +532,15 @@ class TacticalGame:
                 else:
                     target_x, target_y = enemy.x, enemy.y
 
-            # Enemy fallback logic: if outnumbered 3:1, retreat to secondary defensive line
             friendly_count = sum(1 for u in self.state.friendly_units if not u.destroyed)
             enemy_count = sum(1 for u in self.state.enemy_units if not u.destroyed)
             if enemy_count > 0 and friendly_count / enemy_count >= 3 and objective_tile:
-                # Retreat away from objective
                 retreat_x = target_x - 5 if target_x > enemy.x else target_x + 5
                 retreat_y = target_y - 5 if target_y > enemy.y else target_y + 5
                 target_x = max(0, min(retreat_x, len(self.state.map_grid[0])-1))
                 target_y = max(0, min(retreat_y, len(self.state.map_grid)-1))
                 self._log(f"Enemy {enemy.name} falls back due to heavy losses.")
 
-            # Movement step
             if (enemy.x, enemy.y) != (target_x, target_y):
                 dx = 0
                 dy = 0
@@ -494,7 +571,6 @@ class TacticalGame:
             else:
                 self._log(f"Enemy {enemy.name} holds position.")
 
-            # Fire at closest friend in range
             closest_friend = None
             min_dist = float('inf')
             for friend in self.state.friendly_units:
@@ -511,7 +587,6 @@ class TacticalGame:
                     penalty += 20
                 if self.state.is_raining:
                     penalty += 10
-                # Use simple fire resolution (no ammo types for AI for simplicity)
                 hit_chance = enemy.accuracy_base - tile.cover_bonus - penalty + random.randint(-10,10)
                 hit = random.randint(1,100) <= hit_chance
                 if hit:
@@ -530,13 +605,12 @@ class TacticalGame:
                 self._log(f"Enemy {enemy.name} fires at {closest_friend.name} – {'hit' if hit else 'miss'}.")
                 check_rout(closest_friend, self.state)
 
-        # Reset enemy movement points
         for u in self.state.enemy_units:
             if not u.destroyed:
                 u.movement_points = u.movement
 
     def _fpv_attack(self, attacker, target):
-        if attacker.ammo_he <= 0 and attacker.ammo_ap <= 0:  # FPV uses HE by default
+        if attacker.ammo_he <= 0 and attacker.ammo_ap <= 0:
             self._log("No FPV drones available.")
             return
         dist = abs(attacker.x - target.x) + abs(attacker.y - target.y)
@@ -558,7 +632,6 @@ class TacticalGame:
                 else:
                     self.state.enemy_kia += 1
                 self._log(f"{target.name} destroyed.")
-            # Splash damage
             for unit in self.state.enemy_units + self.state.friendly_units:
                 if unit.destroyed or unit == target:
                     continue
@@ -578,7 +651,6 @@ class TacticalGame:
                         self._log(f"{unit.name} destroyed by splash.")
         else:
             self._log(f"FPV drone misses {target.name}.")
-        # Attacker destroyed
         attacker.destroyed = True
         self._log(f"{attacker.name} destroyed in explosion.")
 

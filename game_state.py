@@ -28,12 +28,14 @@ class Unit:
     last_seen_by_player: int = 0
     turns_without_ammo: int = 0
     is_routed: bool = False
-    # NEW: vehicle damage states
+    # Vehicle damage states
     mobility_kill: bool = False
     firepower_kill: bool = False
-    # NEW: radio & command delay
-    radio_range: int = 10   # tiles within which orders are instant
-    order_delay_turns: int = 0  # turns remaining before order executes
+    # Radio & command delay
+    radio_range: int = 10
+    order_delay_turns: int = 0
+    # Spotter capability (for recon drones)
+    is_spotter: bool = False
 
     def to_summary(self):
         return {
@@ -79,9 +81,7 @@ class TacticalGameState:
     ew_comms_jammed: bool = False
     enemy_artillery_fires_remaining: int = 3
     enemy_cas_available: int = 2
-    # NEW: delayed orders (queue)
-    delayed_orders: List[Dict] = field(default_factory=list)  # each: {"action": action, "execution_turn": int, "unit_id": int}
-    # NEW: supply depots (coordinates of ammo caches)
+    delayed_orders: List[Dict] = field(default_factory=list)
     supply_depots: List[tuple] = field(default_factory=list)
     game_over: bool = False
     victory: Optional[bool] = None

@@ -10,10 +10,8 @@ class CommandParser:
         cmd = player_input.strip()
         if not cmd:
             return None
-
         if cmd.startswith('/'):
             return self._parse_structured_command(cmd[1:].strip(), game_state)
-
         return self._parse_military_command(cmd, game_state)
 
     # ------------------------------------------------------------------
@@ -58,6 +56,7 @@ class CommandParser:
             'east': (1,0), 'e': (1,0), 'west': (-1,0), 'w': (-1,0)
         }
 
+        # Determine pattern: COMMAND UNIT DETAILS or UNIT COMMAND DETAILS
         first = filtered[0]
         if first in cmd_map:
             action = cmd_map[first]
@@ -83,7 +82,6 @@ class CommandParser:
             action = cmd_map[filtered[1]]
             rest = filtered[2:]
 
-        # Validate unit exists (skip for artillery/CAS)
         if action not in ['call_arty', 'call_cas'] and not any(u.id == u_id and not u.destroyed for u in game_state.friendly_units):
             return None
 
@@ -94,11 +92,26 @@ class CommandParser:
             # Absolute coordinates (two numbers)
             if len(rest) >= 2 and rest[0].isdigit() and rest[1].isdigit():
                 x, y = int(rest[0]), int(rest[1])
-                # Return action even if out of bounds – game will handle error
-                return {"action_type": "move", "unit_id": u_id, "target_tile": (x, y), "target_unit_id": None, "parameters": {}, "narrative_reason": f"Move to ({x},{y})"}
+                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
+                    return {
+                        "action_type": "move",
+                        "unit_id": u_id,
+                        "target_tile": (x, y),
+                        "target_unit_id": None,
+                        "parameters": {},
+                        "narrative_reason": f"Move to ({x},{y})"
+                    }
             if coords(rest[0]):
                 x, y = coords(rest[0])
-                return {"action_type": "move", "unit_id": u_id, "target_tile": (x, y), "target_unit_id": None, "parameters": {}, "narrative_reason": f"Move to ({x},{y})"}
+                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
+                    return {
+                        "action_type": "move",
+                        "unit_id": u_id,
+                        "target_tile": (x, y),
+                        "target_unit_id": None,
+                        "parameters": {},
+                        "narrative_reason": f"Move to ({x},{y})"
+                    }
             # Relative movement
             if rest[0] in dir_map:
                 direction = rest[0]
@@ -112,7 +125,14 @@ class CommandParser:
                     new_y = unit.y + dy * distance
                     new_x = max(0, min(new_x, len(game_state.map_grid[0])-1))
                     new_y = max(0, min(new_y, len(game_state.map_grid)-1))
-                    return {"action_type": "move", "unit_id": u_id, "target_tile": (new_x, new_y), "target_unit_id": None, "parameters": {}, "narrative_reason": f"Move {distance} {direction}"}
+                    return {
+                        "action_type": "move",
+                        "unit_id": u_id,
+                        "target_tile": (new_x, new_y),
+                        "target_unit_id": None,
+                        "parameters": {},
+                        "narrative_reason": f"Move {distance} {direction}"
+                    }
             if rest[0].isdigit() and len(rest) > 1 and rest[1] in dir_map:
                 distance = int(rest[0])
                 direction = rest[1]
@@ -123,17 +143,51 @@ class CommandParser:
                     new_y = unit.y + dy * distance
                     new_x = max(0, min(new_x, len(game_state.map_grid[0])-1))
                     new_y = max(0, min(new_y, len(game_state.map_grid)-1))
-                    return {"action_type": "move", "unit_id": u_id, "target_tile": (new_x, new_y), "target_unit_id": None, "parameters": {}, "narrative_reason": f"Move {distance} {direction}"}
+                    return {
+                        "action_type": "move",
+                        "unit_id": u_id,
+                        "target_tile": (new_x, new_y),
+                        "target_unit_id": None,
+                        "parameters": {},
+                        "narrative_reason": f"Move {distance} {direction}"
+                    }
             return None
 
-        # ----- FIRE -----
+        # ----- FIRE (now supports coordinates) -----
         if action == 'fire':
             if not rest:
                 return None
+            # Try to extract coordinates
+            coord = None
+            if coords(rest[0]):
+                coord = coords(rest[0])
+            elif len(rest) >= 2 and rest[0].isdigit() and rest[1].isdigit():
+                coord = (int(rest[0]), int(rest[1]))
+            if coord:
+                x, y = coord
+                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
+                    return {
+                        "action_type": "fire",
+                        "unit_id": u_id,
+                        "target_tile": (x, y),
+                        "target_unit_id": None,
+                        "parameters": {},
+                        "narrative_reason": f"Fire at coordinates ({x},{y})"
+                    }
+            # Otherwise treat as target unit ID
             target_id = unit_id(rest[0])
             if target_id is None:
                 return None
-            return {"action_type": "fire", "unit_id": u_id, "target_tile": None, "target_unit_id": target_id, "parameters": {}, "narrative_reason": f"Fire at enemy {target_id}"}
+            if any(u.id == target_id and not u.destroyed for u in game_state.enemy_units):
+                return {
+                    "action_type": "fire",
+                    "unit_id": u_id,
+                    "target_tile": None,
+                    "target_unit_id": target_id,
+                    "parameters": {},
+                    "narrative_reason": f"Fire at enemy {target_id}"
+                }
+            return None
 
         # ----- SUPPRESS -----
         if action == 'suppress':
@@ -142,30 +196,71 @@ class CommandParser:
             target_id = unit_id(rest[0])
             if target_id is None:
                 return None
-            return {"action_type": "suppress", "unit_id": u_id, "target_tile": None, "target_unit_id": target_id, "parameters": {}, "narrative_reason": f"Suppress enemy {target_id}"}
+            if any(u.id == target_id and not u.destroyed for u in game_state.enemy_units):
+                return {
+                    "action_type": "suppress",
+                    "unit_id": u_id,
+                    "target_tile": None,
+                    "target_unit_id": target_id,
+                    "parameters": {},
+                    "narrative_reason": f"Suppress enemy {target_id}"
+                }
+            return None
 
-        # ----- ARTILLERY / FIREMISSION -----
+        # ----- ARTILLERY (off‑map) -----
         if action == 'call_arty':
             if not rest:
                 return None
             if len(rest) >= 2 and rest[0].isdigit() and rest[1].isdigit():
                 x, y = int(rest[0]), int(rest[1])
-                return {"action_type": "call_arty", "unit_id": 1, "target_tile": (x, y), "target_unit_id": None, "parameters": {"rounds": 4}, "narrative_reason": f"Artillery at ({x},{y})"}
+                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
+                    return {
+                        "action_type": "call_arty",
+                        "unit_id": 1,
+                        "target_tile": (x, y),
+                        "target_unit_id": None,
+                        "parameters": {"rounds": 4},
+                        "narrative_reason": f"Artillery at ({x},{y})"
+                    }
             if coords(rest[0]):
                 x, y = coords(rest[0])
-                return {"action_type": "call_arty", "unit_id": 1, "target_tile": (x, y), "target_unit_id": None, "parameters": {"rounds": 4}, "narrative_reason": f"Artillery at ({x},{y})"}
+                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
+                    return {
+                        "action_type": "call_arty",
+                        "unit_id": 1,
+                        "target_tile": (x, y),
+                        "target_unit_id": None,
+                        "parameters": {"rounds": 4},
+                        "narrative_reason": f"Artillery at ({x},{y})"
+                    }
             return None
 
-        # ----- CAS -----
+        # ----- CAS (off‑map) -----
         if action == 'call_cas':
             if not rest:
                 return None
             if len(rest) >= 2 and rest[0].isdigit() and rest[1].isdigit():
                 x, y = int(rest[0]), int(rest[1])
-                return {"action_type": "call_cas", "unit_id": 1, "target_tile": (x, y), "target_unit_id": None, "parameters": {}, "narrative_reason": f"CAS at ({x},{y})"}
+                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
+                    return {
+                        "action_type": "call_cas",
+                        "unit_id": 1,
+                        "target_tile": (x, y),
+                        "target_unit_id": None,
+                        "parameters": {},
+                        "narrative_reason": f"CAS at ({x},{y})"
+                    }
             if coords(rest[0]):
                 x, y = coords(rest[0])
-                return {"action_type": "call_cas", "unit_id": 1, "target_tile": (x, y), "target_unit_id": None, "parameters": {}, "narrative_reason": f"CAS at ({x},{y})"}
+                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
+                    return {
+                        "action_type": "call_cas",
+                        "unit_id": 1,
+                        "target_tile": (x, y),
+                        "target_unit_id": None,
+                        "parameters": {},
+                        "narrative_reason": f"CAS at ({x},{y})"
+                    }
             return None
 
         # ----- RECON -----
@@ -178,13 +273,35 @@ class CommandParser:
                     coords_target = coords(rest[0])
             if coords_target:
                 x, y = coords_target
-                return {"action_type": "recon", "unit_id": u_id, "target_tile": (x, y), "target_unit_id": None, "parameters": {"radius": 3}, "narrative_reason": f"Recon at ({x},{y})"}
+                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
+                    return {
+                        "action_type": "recon",
+                        "unit_id": u_id,
+                        "target_tile": (x, y),
+                        "target_unit_id": None,
+                        "parameters": {"radius": 3},
+                        "narrative_reason": f"Recon at ({x},{y})"
+                    }
             else:
-                return {"action_type": "recon", "unit_id": u_id, "target_tile": None, "target_unit_id": None, "parameters": {"radius": 3}, "narrative_reason": "General recon"}
+                return {
+                    "action_type": "recon",
+                    "unit_id": u_id,
+                    "target_tile": None,
+                    "target_unit_id": None,
+                    "parameters": {"radius": 3},
+                    "narrative_reason": "General recon"
+                }
 
         # ----- DEPLOY RECON DRONE -----
         if action == 'deploy_recon_drone':
-            return {"action_type": "deploy_recon_drone", "unit_id": u_id, "target_tile": None, "target_unit_id": None, "parameters": {"radius": 5}, "narrative_reason": "Deploy recon drone"}
+            return {
+                "action_type": "deploy_recon_drone",
+                "unit_id": u_id,
+                "target_tile": None,
+                "target_unit_id": None,
+                "parameters": {"radius": 5},
+                "narrative_reason": "Deploy recon drone"
+            }
 
         # ----- FPV ATTACK -----
         if action == 'fpv_attack':
@@ -193,16 +310,32 @@ class CommandParser:
             target_id = unit_id(rest[0])
             if target_id is None:
                 return None
-            return {"action_type": "fpv_attack", "unit_id": u_id, "target_tile": None, "target_unit_id": target_id, "parameters": {}, "narrative_reason": f"FPV attack on enemy {target_id}"}
+            if any(u.id == target_id and not u.destroyed for u in game_state.enemy_units):
+                return {
+                    "action_type": "fpv_attack",
+                    "unit_id": u_id,
+                    "target_tile": None,
+                    "target_unit_id": target_id,
+                    "parameters": {},
+                    "narrative_reason": f"FPV attack on enemy {target_id}"
+                }
+            return None
 
         # ----- HOLD -----
         if action == 'hold':
-            return {"action_type": "hold", "unit_id": u_id, "target_tile": None, "target_unit_id": None, "parameters": {}, "narrative_reason": "Hold position"}
+            return {
+                "action_type": "hold",
+                "unit_id": u_id,
+                "target_tile": None,
+                "target_unit_id": None,
+                "parameters": {},
+                "narrative_reason": "Hold position"
+            }
 
         return None
 
     # ------------------------------------------------------------------
-    # STRUCTURED /COMMAND PARSER
+    # STRUCTURED /COMMAND PARSER (adds coordinate fire)
     # ------------------------------------------------------------------
     def _parse_structured_command(self, cmd: str, game_state) -> Optional[Dict[str, Any]]:
         parts = cmd.split()
@@ -236,7 +369,15 @@ class CommandParser:
             third = parts[2]
             if coords(third):
                 x, y = coords(third)
-                return {"action_type": "move", "unit_id": u_id, "target_tile": (x, y), "target_unit_id": None, "parameters": {}, "narrative_reason": f"/move to ({x},{y})"}
+                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
+                    return {
+                        "action_type": "move",
+                        "unit_id": u_id,
+                        "target_tile": (x, y),
+                        "target_unit_id": None,
+                        "parameters": {},
+                        "narrative_reason": f"/move to ({x},{y})"
+                    }
             if third in dir_map:
                 direction = third
                 distance = 1
@@ -249,7 +390,14 @@ class CommandParser:
                     new_y = unit.y + dy * distance
                     new_x = max(0, min(new_x, len(game_state.map_grid[0])-1))
                     new_y = max(0, min(new_y, len(game_state.map_grid)-1))
-                    return {"action_type": "move", "unit_id": u_id, "target_tile": (new_x, new_y), "target_unit_id": None, "parameters": {}, "narrative_reason": f"/move {distance} {direction}"}
+                    return {
+                        "action_type": "move",
+                        "unit_id": u_id,
+                        "target_tile": (new_x, new_y),
+                        "target_unit_id": None,
+                        "parameters": {},
+                        "narrative_reason": f"/move {distance} {direction}"
+                    }
             if third.isdigit() and len(parts) >= 4 and parts[3] in dir_map:
                 distance = int(third)
                 direction = parts[3]
@@ -260,17 +408,45 @@ class CommandParser:
                     new_y = unit.y + dy * distance
                     new_x = max(0, min(new_x, len(game_state.map_grid[0])-1))
                     new_y = max(0, min(new_y, len(game_state.map_grid)-1))
-                    return {"action_type": "move", "unit_id": u_id, "target_tile": (new_x, new_y), "target_unit_id": None, "parameters": {}, "narrative_reason": f"/move {distance} {direction}"}
+                    return {
+                        "action_type": "move",
+                        "unit_id": u_id,
+                        "target_tile": (new_x, new_y),
+                        "target_unit_id": None,
+                        "parameters": {},
+                        "narrative_reason": f"/move {distance} {direction}"
+                    }
             return None
 
-        # FIRE
+        # FIRE (now supports coordinates)
         if action in ["fire", "f", "attack", "shoot"] and len(parts) >= 3:
             shooter_id = unit_id(parts[1])
-            target_id = unit_id(parts[2])
-            if shooter_id is None or target_id is None:
+            if shooter_id is None:
                 return None
-            if any(u.id == target_id and not u.destroyed for u in game_state.enemy_units) and any(u.id == shooter_id and not u.destroyed for u in game_state.friendly_units):
-                return {"action_type": "fire", "unit_id": shooter_id, "target_tile": None, "target_unit_id": target_id, "parameters": {}, "narrative_reason": f"/fire at {parts[2]}"}
+            # Check if third part is coordinates
+            if coords(parts[2]):
+                x, y = coords(parts[2])
+                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
+                    return {
+                        "action_type": "fire",
+                        "unit_id": shooter_id,
+                        "target_tile": (x, y),
+                        "target_unit_id": None,
+                        "parameters": {},
+                        "narrative_reason": f"/fire at ({x},{y})"
+                    }
+            # Otherwise treat as unit target
+            target_id = unit_id(parts[2])
+            if target_id is not None:
+                if any(u.id == target_id and not u.destroyed for u in game_state.enemy_units):
+                    return {
+                        "action_type": "fire",
+                        "unit_id": shooter_id,
+                        "target_tile": None,
+                        "target_unit_id": target_id,
+                        "parameters": {},
+                        "narrative_reason": f"/fire at {parts[2]}"
+                    }
             return None
 
         # SUPPRESS
@@ -280,7 +456,14 @@ class CommandParser:
             if shooter_id is None or target_id is None:
                 return None
             if any(u.id == target_id and not u.destroyed for u in game_state.enemy_units) and any(u.id == shooter_id and not u.destroyed for u in game_state.friendly_units):
-                return {"action_type": "suppress", "unit_id": shooter_id, "target_tile": None, "target_unit_id": target_id, "parameters": {}, "narrative_reason": f"/suppress {parts[2]}"}
+                return {
+                    "action_type": "suppress",
+                    "unit_id": shooter_id,
+                    "target_tile": None,
+                    "target_unit_id": target_id,
+                    "parameters": {},
+                    "narrative_reason": f"/suppress {parts[2]}"
+                }
             return None
 
         # ARTILLERY / FIREMISSION
@@ -288,7 +471,15 @@ class CommandParser:
             xy = coords(parts[1])
             if xy:
                 x, y = xy
-                return {"action_type": "call_arty", "unit_id": 1, "target_tile": (x, y), "target_unit_id": None, "parameters": {"rounds": 4}, "narrative_reason": f"/arty at ({x},{y})"}
+                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
+                    return {
+                        "action_type": "call_arty",
+                        "unit_id": 1,
+                        "target_tile": (x, y),
+                        "target_unit_id": None,
+                        "parameters": {"rounds": 4},
+                        "narrative_reason": f"/arty at ({x},{y})"
+                    }
             return None
 
         # CAS
@@ -296,7 +487,15 @@ class CommandParser:
             xy = coords(parts[1])
             if xy:
                 x, y = xy
-                return {"action_type": "call_cas", "unit_id": 1, "target_tile": (x, y), "target_unit_id": None, "parameters": {}, "narrative_reason": f"/cas at ({x},{y})"}
+                if 0 <= x < len(game_state.map_grid[0]) and 0 <= y < len(game_state.map_grid):
+                    return {
+                        "action_type": "call_cas",
+                        "unit_id": 1,
+                        "target_tile": (x, y),
+                        "target_unit_id": None,
+                        "parameters": {},
+                        "narrative_reason": f"/cas at ({x},{y})"
+                    }
             return None
 
         # RECON
@@ -304,14 +503,28 @@ class CommandParser:
             u_id = unit_id(parts[1]) if len(parts) >= 2 else 1
             if u_id is None:
                 u_id = 1
-            return {"action_type": "recon", "unit_id": u_id, "target_tile": None, "target_unit_id": None, "parameters": {"radius": 3}, "narrative_reason": "/recon"}
+            return {
+                "action_type": "recon",
+                "unit_id": u_id,
+                "target_tile": None,
+                "target_unit_id": None,
+                "parameters": {"radius": 3},
+                "narrative_reason": "/recon"
+            }
 
         # DEPLOY RECON DRONE
         if action in ["drone", "deploy_drone"]:
             u_id = unit_id(parts[1]) if len(parts) >= 2 else 1
             if u_id is None:
                 u_id = 1
-            return {"action_type": "deploy_recon_drone", "unit_id": u_id, "target_tile": None, "target_unit_id": None, "parameters": {"radius": 5}, "narrative_reason": "/drone"}
+            return {
+                "action_type": "deploy_recon_drone",
+                "unit_id": u_id,
+                "target_tile": None,
+                "target_unit_id": None,
+                "parameters": {"radius": 5},
+                "narrative_reason": "/drone"
+            }
 
         # FPV / KAMIKAZE
         if action in ["fpv", "kamikaze"] and len(parts) >= 3:
@@ -320,7 +533,14 @@ class CommandParser:
             if drone_id is None or target_id is None:
                 return None
             if any(u.id == target_id and not u.destroyed for u in game_state.enemy_units) and any(u.id == drone_id and not u.destroyed for u in game_state.friendly_units):
-                return {"action_type": "fpv_attack", "unit_id": drone_id, "target_tile": None, "target_unit_id": target_id, "parameters": {}, "narrative_reason": f"/fpv at {parts[2]}"}
+                return {
+                    "action_type": "fpv_attack",
+                    "unit_id": drone_id,
+                    "target_tile": None,
+                    "target_unit_id": target_id,
+                    "parameters": {},
+                    "narrative_reason": f"/fpv at {parts[2]}"
+                }
             return None
 
         # HOLD
@@ -328,10 +548,24 @@ class CommandParser:
             u_id = unit_id(parts[1])
             if u_id is None:
                 return None
-            return {"action_type": "hold", "unit_id": u_id, "target_tile": None, "target_unit_id": None, "parameters": {}, "narrative_reason": "/hold"}
+            return {
+                "action_type": "hold",
+                "unit_id": u_id,
+                "target_tile": None,
+                "target_unit_id": None,
+                "parameters": {},
+                "narrative_reason": "/hold"
+            }
 
         # DEBUG
         if action == "positions":
-            return {"action_type": "debug_positions", "unit_id": 0, "target_tile": None, "target_unit_id": None, "parameters": {}, "narrative_reason": "show positions"}
+            return {
+                "action_type": "debug_positions",
+                "unit_id": 0,
+                "target_tile": None,
+                "target_unit_id": None,
+                "parameters": {},
+                "narrative_reason": "show positions"
+            }
 
         return None

@@ -2,18 +2,6 @@ import random
 from game_state import Unit
 from factions import FACTIONS
 
-# Ammo consumption per shot (no longer used directly, but kept for reference)
-AMMO_PER_SHOT = {
-    "R": (30, 0),   # (HE, AP)
-    "T": (1, 1),
-    "I": (5, 5),
-    "H": (2, 2),
-    "A": (3, 0),
-    "K": (1, 0),
-    "D": (0, 0),
-    "P": (20, 0)
-}
-
 def create_units_for_faction(faction_name, side, start_positions, unit_types=None):
     faction = FACTIONS[faction_name]
     units = []
@@ -46,11 +34,10 @@ def create_units_for_faction(faction_name, side, start_positions, unit_types=Non
             accuracy_base=template["accuracy_base"] + faction["accuracy_bonus"],
             suppress_threshold=template["suppress_threshold"], emoji=template["emoji"],
             range_tiles=template.get("range_tiles", 15),
-            radio_range=10  # default
+            radio_range=10
         )
         units.append(unit)
 
-    # Add recon drone and FPV drone – offset spawn
     drone_templates = ["recon_drone", "fpv_kamikaze"]
     next_id = len(units) + 1
     for idx, dt in enumerate(drone_templates):
@@ -67,7 +54,8 @@ def create_units_for_faction(faction_name, side, start_positions, unit_types=Non
                 movement=template["movement"], movement_points=template["movement"],
                 accuracy_base=template["accuracy_base"], suppress_threshold=0,
                 emoji=template["emoji"], range_tiles=template.get("range_tiles", 0),
-                radio_range=10
+                radio_range=10,
+                is_spotter=(dt == "recon_drone")
             )
             units.append(drone)
             next_id += 1
@@ -80,24 +68,19 @@ def resolve_fire(attacker, target, terrain_cover, action_type, game_state):
     damage = 0
     was_destroyed = False
     if hit:
-        # Use appropriate ammo type – already handled in tactical_game.py, but here for fallback
         is_armored = target.armor > 50
         if is_armored:
-            ammo_cost_ap = 1
-            if attacker.ammo_ap >= ammo_cost_ap:
-                attacker.ammo_ap -= ammo_cost_ap
+            if attacker.ammo_ap <= 0:
+                hit = False
+            else:
+                attacker.ammo_ap -= 1
                 damage_mult = 1.2
-            else:
-                hit = False
-                damage = 0
         else:
-            ammo_cost_he = 30 if attacker.type_code == 'R' else 1
-            if attacker.ammo_he >= ammo_cost_he:
-                attacker.ammo_he -= ammo_cost_he
-                damage_mult = 0.8
-            else:
+            if attacker.ammo_he <= 0:
                 hit = False
-                damage = 0
+            else:
+                attacker.ammo_he -= 1
+                damage_mult = 0.8
         if hit:
             damage = random.uniform(15, 35) * damage_mult * (1 - target.armor/100)
             target.strength -= damage
@@ -140,7 +123,8 @@ def check_rout(unit, game_state):
         min_dist = float('inf')
         nearest = None
         for enemy in game_state.enemy_units:
-            if enemy.destroyed: continue
+            if enemy.destroyed:
+                continue
             d = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
             if d < min_dist:
                 min_dist = d
@@ -160,5 +144,4 @@ def check_rout(unit, game_state):
     return False
 
 def apply_ew_effects(game_state):
-    # Placeholder for EW effects
     pass
