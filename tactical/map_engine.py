@@ -21,9 +21,7 @@ TERRAIN = {
 }
 
 def generate_tactical_map(width=50, height=14):
-    """Generate a tactical map grid and objective coordinates."""
     grid = [[None for _ in range(width)] for __ in range(height)]
-    # Initialize with open ground
     for y in range(height):
         for x in range(width):
             grid[y][x] = Tile(type='.', emoji=TERRAIN['.'][0],
@@ -37,11 +35,10 @@ def generate_tactical_map(width=50, height=14):
     for y in range(road_y, height-3):
         grid[y][width-7] = Tile(type='R|', emoji=TERRAIN['R|'][0],
                                 cover_bonus=TERRAIN['R|'][2], movement_cost=TERRAIN['R|'][3])
-    # Scatter buildings (20% of map)
+    # Scatter buildings
     for _ in range(max(10, width // 5)):
         bx = random.randint(4, width-4)
         by = random.randint(2, height-3)
-        # Avoid placing on roads
         if not (by == road_y and 5 <= bx <= width-5) and not (bx == width-7 and by >= road_y):
             grid[by][bx] = Tile(type='U', emoji=TERRAIN['U'][1],
                                 cover_bonus=TERRAIN['U'][2], movement_cost=TERRAIN['U'][3])
@@ -51,7 +48,7 @@ def generate_tactical_map(width=50, height=14):
             if random.random() > 0.3:
                 grid[y][x] = Tile(type='T', emoji=TERRAIN['T'][1],
                                   cover_bonus=TERRAIN['T'][2], movement_cost=TERRAIN['T'][3])
-    # River (water obstacle)
+    # River
     river_y = road_y + 3
     for x in range(8, 14):
         grid[river_y][x] = Tile(type='W', emoji=TERRAIN['W'][0],
@@ -102,15 +99,15 @@ def render_ascii_map(game_state, fog_of_war=True):
     current_turn = game_state.turn
 
     lines = []
-    # Column header (every 5 columns)
-    col_header = "   "
-    for x in range(width):
-        if x % 5 == 0:
-            col_header += f"{x//5}" if x == 0 else f"   {x//5}"
-        else:
-            col_header += " "
-    col_header = col_header[:width+3]
-    lines.append(col_header)
+    # Build column header with numbers every 5 columns, aligned to grid
+    header_chars = [' ' for _ in range(width + 3)]  # +3 for row number column
+    for x in range(0, width, 5):
+        pos = x + 3  # shift by row label width
+        num_str = str(x)
+        for i, ch in enumerate(num_str):
+            if pos + i < len(header_chars):
+                header_chars[pos + i] = ch
+    lines.append("".join(header_chars))
     lines.append("   " + "─" * width)
 
     for y in range(height):
@@ -144,5 +141,5 @@ def render_ascii_map(game_state, fog_of_war=True):
 
     legend = "  Units: R=Rifle T=Tank I=IFV H=Helo A=Arty D=Drone K=Kamikaze P=Proxy S=SAM  Green=Friend Red=Enemy  ! = Suppressed"
     lines.append(legend)
-    lines.append("  Coordinates: Column numbers every 5. Use 'move T2 3 east' for relative movement.")
+    lines.append("  Coordinates: Column numbers every 5, row numbers on left. Use 'move T2 3 east' for relative movement.")
     return "\n".join(lines)

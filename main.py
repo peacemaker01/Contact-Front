@@ -18,7 +18,7 @@ SPLASH = f"""
  ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝   ╚═╝   
 {ANSI['RESET']}
           ⚔️  LLM-DRIVEN ASYMMETRIC WARGAME  ⚔️
-               CONTACT FRONT v1.0
+               CONTACT FRONT v1.6
 """
 
 def select_faction():
