@@ -153,7 +153,7 @@ public class GameController {
     }
 
     public void endTurn() {
-        engine.resolvePlayerTurn(new ArrayList<>(staged));
+        engine.tick();
         staged.clear();
         stagedUnits.clear();
         mode = Mode.NONE;

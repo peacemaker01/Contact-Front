@@ -5,18 +5,19 @@ import java.util.List;
 
 public class GameState {
     public int turn = 1;
-    public int maxTurns = 12;
-    public String mode = "attacker";
+    public int maxTurns = 999;
+    public long elapsedMs = 0;
+    public String mode = "realtime";
     public Faction playerFaction;
     public Faction enemyFaction;
     public String scenarioId = "default";
 
-    public CommandMode commandMode = CommandMode.EXPLICIT;
-    public java.util.Map<Faction, Doctrine> factionDoctrines = new java.util.HashMap<>();
+    public CommandMode commandMode = CommandMode.DOCTRINE;
+    public java.util.Map<Faction, Doctrine> factionDoctrines = new java.util.HashMap();
 
     public double latitude = 35.0;
     public double longitude = -120.0;
-    public String locationName = "Selected Location";
+    public String locationName = "Generated Location";
 
     public Tile[][] grid;
     public Visibility[][] visibility;
@@ -46,11 +47,11 @@ public class GameState {
     public static final class LogEntry {
         public final String channel;
         public final String text;
-        public final int turn;
-        public LogEntry(String channel, String text, int turn) {
+        public final long elapsedMs;
+        public LogEntry(String channel, String text, long elapsedMs) {
             this.channel = channel;
             this.text = text;
-            this.turn = turn;
+            this.elapsedMs = elapsedMs;
         }
     }
 
@@ -120,7 +121,7 @@ public class GameState {
 
     public void log(String channel, String message) {
         narrativeLog.add(message);
-        eventLog.add(new LogEntry(channel, message, turn));
+        eventLog.add(new LogEntry(channel, message, elapsedMs));
         trimLog();
         if (eventLog.size() > 400) eventLog.subList(0, eventLog.size() - 400).clear();
     }

@@ -49,7 +49,7 @@ public final class Unit {
     public int lastKnownY = -1;
     public int lastSeenTurn = -1;
 
-    public int lastContactTurn = -1;
+    public long lastContactElapsedMs = -1;
     public int lastContactEnemyId = -1;
     public int lastContactX = -1;
     public int lastContactY = -1;

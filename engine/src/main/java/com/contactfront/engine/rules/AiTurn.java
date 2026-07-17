@@ -163,6 +163,157 @@ public final class AiTurn {
         return bestX != -1 ? new int[]{bestX, bestY} : null;
     }
 
+    public static void continuousRun(GameState s, Random rng) {
+        for (Unit enemy : new ArrayList<>(s.enemyUnits)) {
+            if (enemy.destroyed || enemy.routed) continue;
+
+            if (enemy.hasSpecial("kamikaze")) {
+                Unit t = closestVisibleFriendly(s, enemy);
+                if (t != null && manhattan(enemy.x, enemy.y, t.x, t.y) <= enemyReconOrWeapon(s, enemy, t)) {
+                    FpvAttack.strike(s, enemy, t, rng);
+                    continue;
+                }
+            }
+
+            Unit target = closestVisibleFriendly(s, enemy);
+            int tx = s.width() / 2;
+            int ty = s.height() / 2;
+
+            boolean isSupport = enemy.profile.category() == UnitCategory.ARTILLERY 
+                             || enemy.profile.category() == UnitCategory.LOGISTICS;
+
+            if (isSupport) {
+                int[] backCover = findBackLineCover(s);
+                tx = backCover[0];
+                ty = backCover[1];
+                enemy.stance = Stance.DEFENSIVE;
+            } else if (target != null) {
+                int dist = manhattan(enemy.x, enemy.y, target.x, target.y);
+                int bestRange = enemyBestRange(s, enemy);
+
+                if (enemy.profile.category() == UnitCategory.ARMOR) {
+                    if (dist <= bestRange) {
+                        int[] coverTile = findNearbyCoverWithinRange(s, enemy, target, bestRange);
+                        if (coverTile != null) {
+                            tx = coverTile[0];
+                            ty = coverTile[1];
+                        }
+                    } else {
+                        tx = target.x;
+                        ty = target.y;
+                    }
+                } else {
+                    if (enemy.strength < 50 || enemy.isSuppressed()) {
+                        int[] coverTile = findNearestCover(s, enemy);
+                        if (coverTile != null) {
+                            tx = coverTile[0];
+                            ty = coverTile[1];
+                            enemy.stance = Stance.DEFENSIVE;
+                        } else {
+                            tx = target.x;
+                            ty = target.y;
+                        }
+                    } else {
+                        if (enemy.stance != Stance.OVERWATCH) {
+                            Unit overwatchTarget = findOverwatchThreat(s, enemy);
+                            if (overwatchTarget != null && manhattan(enemy.x, enemy.y, overwatchTarget.x, overwatchTarget.y) <= bestRange) {
+                                tx = overwatchTarget.x;
+                                ty = overwatchTarget.y;
+                            } else {
+                                tx = target.x;
+                                ty = target.y;
+                            }
+                        } else {
+                            tx = target.x;
+                            ty = target.y;
+                        }
+                    }
+                }
+            } else if (!s.objectives.isEmpty()) {
+                tx = s.objectives.get(0).x;
+                ty = s.objectives.get(0).y;
+            }
+
+            if (!isSupport) {
+                chooseStance(enemy, s);
+            }
+
+            if (enemy.x != tx || enemy.y != ty) {
+                List<int[]> path = findPath(s, enemy, tx, ty);
+                if (path != null && path.size() > 1) {
+                    boolean pathBlocked = false;
+                    for (int i = 1; i < path.size(); i++) {
+                        int[] step = path.get(i);
+                        if (s.hasSmoke(step[0], step[1])) {
+                            pathBlocked = true;
+                            break;
+                        }
+                        boolean hasFriendlyBlocking = false;
+                        for (Unit f : s.friendlyUnits) {
+                            if (!f.destroyed && f.x == step[0] && f.y == step[1]) {
+                                hasFriendlyBlocking = true;
+                                break;
+                            }
+                        }
+                        if (hasFriendlyBlocking) {
+                            pathBlocked = true;
+                            break;
+                        }
+                        boolean success = Movement.applyMove(s, enemy, step[0], step[1]);
+                        if (success) {
+                            overwatchFire(s, enemy, rng);
+                            if (enemy.destroyed || enemy.routed) break;
+                        } else {
+                            break;
+                        }
+                    }
+                    if (pathBlocked && enemy.strength > 40) {
+                        boolean shouldFlank = true;
+                        if (s.commandMode == CommandMode.DOCTRINE) {
+                            Doctrine doctrine = s.factionDoctrines.get(enemy.faction);
+                            if (doctrine != null) {
+                                shouldFlank = doctrine.shouldFlank(enemy);
+                            }
+                        }
+                        if (shouldFlank) {
+                            int[] flankPath = findFlankPath(s, enemy, tx, ty);
+                            if (flankPath != null) {
+                                boolean success = Movement.applyMove(s, enemy, flankPath[0], flankPath[1]);
+                                if (success) {
+                                    overwatchFire(s, enemy, rng);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (enemy.destroyed || enemy.routed) continue;
+
+            Unit fireTarget = closestVisibleFriendly(s, enemy);
+            if (fireTarget != null && manhattan(enemy.x, enemy.y, fireTarget.x, fireTarget.y) <= enemyBestRange(s, enemy)) {
+                Combat.resolveFire(s, enemy, fireTarget, rng);
+                s.log("combat", enemy.profile.name() + " engages " + fireTarget.profile.name() + ".");
+            }
+        }
+
+        processEnemyDelayedOrders(s, rng);
+    }
+
+    private static void processEnemyDelayedOrders(GameState s, Random rng) {
+        for (DelayedOrder order : s.delayedOrders) {
+            if (order.command instanceof EnemyStrike es) {
+                s.delayedOrders.remove(order);
+                if (es.kind().equals(EnemyStrike.ARTY)) {
+                    int cep = s.ewGpsJammed ? 100 : 50;
+                    Artillery.resolve(s, es.x(), es.y(), es.rounds(), rng, cep);
+                } else if (es.kind().equals(EnemyStrike.CAS)) {
+                    CloseAirSupport.applyCas(s, es.x(), es.y(), rng);
+                }
+            }
+        }
+    }
+
     public static void run(GameState s, Random rng) {
         if (s.commandMode == CommandMode.DOCTRINE) {
             for (Unit enemy : s.enemyUnits) {

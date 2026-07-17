@@ -23,6 +23,7 @@ public class MapView {
     private final GameController ctrl;
     private final int tile;
     private double zoom = 1.0;
+    private final java.util.function.BiConsumer<Integer, Integer> onMapClick;
 
     private final Canvas canvas;
     private final StackPane stack;
@@ -37,8 +38,13 @@ public class MapView {
     private boolean pressOnUnit = false;
 
     public MapView(GameController ctrl, int tileSize) {
+        this(ctrl, tileSize, null);
+    }
+    
+    public MapView(GameController ctrl, int tileSize, java.util.function.BiConsumer<Integer, Integer> onMapClick) {
         this.ctrl = ctrl;
         this.tile = tileSize;
+        this.onMapClick = onMapClick;
         this.canvas = new Canvas();
         this.stack = new StackPane(canvas);
         this.scroll = new javafx.scene.control.ScrollPane(stack);
@@ -64,6 +70,11 @@ public class MapView {
             int tx = tileAt(e.getX()), ty = tileAt(e.getY());
             if (e.getButton() == MouseButton.SECONDARY) {
                 ctrl.contextOrder(tx, ty);
+                return;
+            }
+            // Check for editor mode click
+            if (onMapClick != null) {
+                onMapClick.accept(tx, ty);
                 return;
             }
             // primary

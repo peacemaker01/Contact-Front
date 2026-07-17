@@ -10,6 +10,9 @@ import java.util.Random;
 public final class TacticalEngine {
     private final GameState state;
     private final Random rng;
+    private long lastResupplyTick = 0;
+    private static final long TICK_MS = 500;
+    private static final long RESUPPLY_INTERVAL_MS = 2500;
 
     public TacticalEngine(GameState state, Random rng) {
         this.state = state;
@@ -24,6 +27,31 @@ public final class TacticalEngine {
         for (Unit u : state.friendlyUnits) if (!u.destroyed) u.movementPoints = u.movement;
         for (Unit u : state.enemyUnits) if (!u.destroyed) u.movementPoints = u.movement;
         com.contactfront.engine.rules.Visibility.computePlayerVisibility(state);
+    }
+
+    public void tick() {
+        if (state.gameOver) return;
+        state.elapsedMs += TICK_MS;
+        state.turn = (int) (state.elapsedMs / 1000);
+        runAiTick();
+        processDelayedOrders(state, rng);
+        Suppression.tick(state);
+        state.tickSmoke();
+        checkResupply();
+        com.contactfront.engine.rules.Visibility.computePlayerVisibility(state);
+        Objectives.check(state);
+    }
+
+    public void runAiTick() {
+        AiTurn.continuousRun(state, rng);
+    }
+
+    private void checkResupply() {
+        long ticks = state.elapsedMs / RESUPPLY_INTERVAL_MS;
+        if (ticks > lastResupplyTick) {
+            lastResupplyTick = ticks;
+            Resupply.resupplyPhase(state);
+        }
     }
 
     public ActionResult issue(Action action) {
@@ -46,32 +74,62 @@ public final class TacticalEngine {
             }
         }
 
-        processDelayedOrders();
+        processDelayedOrders(state, rng);
 
         boolean executed = resolveAction(action, false);
         if (!executed) return ActionResult.reject("could not execute order");
 
         if (!state.gameOver) {
-            AiTurn.run(state, rng);
-            processDelayedOrders();
-            if (state.turn % 5 == 0) Resupply.resupplyPhase(state);
-            Suppression.tick(state);
-            resetMovementPoints();
+            processDelayedOrders(state, rng);
+            state.elapsedMs += TICK_MS;
+            resolveAction(action, false);
             com.contactfront.engine.rules.Visibility.computePlayerVisibility(state);
             Objectives.check(state);
-            if (!state.gameOver) state.turn++;
         }
         return ActionResult.ok();
     }
 
-    public void processDelayedOrders() {
+    public void processDelayedOrders(GameState s, Random rng) {
         List<DelayedOrder> remaining = new ArrayList<>();
         for (DelayedOrder order : state.delayedOrders) {
-            if (order.executionTurn <= state.turn) {
-                if (order.command instanceof Action a) resolveAction(a, true);
-                else if (order.command instanceof EnemyStrike es) applyEnemyStrike(es);
-            } else {
-                remaining.add(order);
+            if (order.command instanceof EnemyStrike es) {
+                if (s.elapsedMs >= order.executionTurn * 1000) {
+                    int cep = s.ewGpsJammed ? 100 : 50;
+                    Artillery.resolve(s, es.x(), es.y(), es.rounds(), rng, cep);
+                } else {
+                    remaining.add(order);
+                }
+            } else if (order.command instanceof CallArtilleryAction ca) {
+                if (s.elapsedMs >= order.executionTurn * 1000) {
+                    Artillery.resolve(s, ca.targetX(), ca.targetY(), 3, rng, s.ewGpsJammed ? 100 : 50);
+                    s.log("orders", "Artillery strike at (" + ca.targetX() + "," + ca.targetY() + ").");
+                } else {
+                    remaining.add(order);
+                }
+            } else if (order.command instanceof CallCasAction c) {
+                if (s.elapsedMs >= order.executionTurn * 1000) {
+                    CloseAirSupport.applyCas(s, c.targetX(), c.targetY(), rng);
+                    s.log("orders", "CAS strike at (" + c.targetX() + "," + c.targetY() + ").");
+                } else {
+                    remaining.add(order);
+                }
+            } else if (order.command instanceof CallSmokeAction c) {
+                if (s.elapsedMs >= order.executionTurn * 1000) {
+                    for (int sy = c.targetY() - 1; sy <= c.targetY() + 1; sy++) {
+                        for (int sx = c.targetX() - 1; sx <= c.targetX() + 1; sx++) {
+                            s.addSmoke(sx, sy, 3);
+                        }
+                    }
+                    s.log("orders", "Smoke deployed at (" + c.targetX() + "," + c.targetY() + ").");
+                } else {
+                    remaining.add(order);
+                }
+            } else if (order.command instanceof Action a) {
+                if (s.elapsedMs >= order.executionTurn * 1000) {
+                    resolveAction(a, true);
+                } else {
+                    remaining.add(order);
+                }
             }
         }
         state.delayedOrders = remaining;
@@ -79,7 +137,7 @@ public final class TacticalEngine {
 
     public void runEnemyTurn() {
         AiTurn.run(state, rng);
-        processDelayedOrders();
+        processDelayedOrders(state, rng);
         Suppression.tick(state);
         resetMovementPoints();
         com.contactfront.engine.rules.Visibility.computePlayerVisibility(state);

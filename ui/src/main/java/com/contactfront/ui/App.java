@@ -10,9 +10,7 @@ import com.contactfront.engine.model.Terrain;
 import com.contactfront.engine.model.Tile;
 import com.contactfront.engine.model.Unit;
 import com.contactfront.engine.model.UnitProfile;
-import com.contactfront.engine.terrain.SatelliteClassifier;
 import com.contactfront.ui.assets.GoogleMapsClient;
-import com.contactfront.ui.assets.ScenarioSerializer;
 import com.contactfront.ui.assets.SatelliteImageProcessor;
 import com.contactfront.ui.controller.GameController;
 import com.contactfront.ui.view.*;
@@ -24,12 +22,12 @@ import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.*;
 import javafx.scene.Node;
 import javafx.stage.FileChooser;
-import javafx.stage.Screen;
 import javafx.stage.Stage;
 
 import java.io.File;
 import java.nio.file.Path;
 import java.util.Random;
+import javafx.animation.AnimationTimer;
 
 public class App extends Application {
     private GameController ctrl;
@@ -43,6 +41,9 @@ public class App extends Application {
     private Stage primaryStage;
     private Faction playerFaction = Faction.USA;
     private Faction enemyFaction = Faction.RUSSIA;
+    private AnimationTimer gameLoop;
+    private static final long TICK_MS = 500;
+    private long lastTickNs = 0;
 
     @Override
     public void start(Stage stage) {
@@ -53,10 +54,6 @@ public class App extends Application {
     private void showMainMenu() {
         MainMenu menu = new MainMenu(primaryStage, 
             () -> startNewGame(playerFaction, enemyFaction),
-            faction -> {
-                playerFaction = faction;
-                showEnemySelect(faction);
-            },
             this::doLoad,
             this::showOptions,
             this::showScenarioBuilder,
@@ -162,7 +159,7 @@ public class App extends Application {
         sceneRoot.getChildren().add(bp);
         Scene scene = new Scene(sceneRoot);
         primaryStage.setScene(scene);
-        primaryStage.setTitle("Contact Front — Tactical Mode (Satellite Terrain)");
+        primaryStage.setTitle("Contact Front — Real-Time Tactical Mode");
         primaryStage.setMinWidth(1000);
         primaryStage.setMinHeight(600);
         primaryStage.centerOnScreen();
@@ -170,7 +167,27 @@ public class App extends Application {
         primaryStage.show();
 
         scene.setOnKeyPressed(e -> handleKey(e));
+        startGameLoop();
         refreshAll();
+    }
+    
+    private void startGameLoop() {
+        if (gameLoop != null) gameLoop.stop();
+        lastTickNs = System.nanoTime();
+        gameLoop = new AnimationTimer() {
+            @Override
+            public void handle(long now) {
+                long elapsedNs = now - lastTickNs;
+                if (elapsedNs >= TICK_MS * 1_000_000) {
+                    if (ctrl != null && ctrl.state != null && !ctrl.state.gameOver) {
+                        ctrl.engine.tick();
+                    }
+                    lastTickNs = now;
+                }
+                mapView.redraw();
+            }
+        };
+        gameLoop.start();
     }
     
     private Unit spawnUnit(GameState s, String profileId, Faction f, int ax, int ay, int id, Profiles profiles) {
@@ -200,48 +217,89 @@ public class App extends Application {
         return false;
     }
 
-    private void showEnemySelect(Faction playerFaction) {
-        EnemySelectDialog dialog = new EnemySelectDialog(primaryStage, playerFaction, this::startNewGame);
-        dialog.show();
+    private void startNewGame(Faction playerFaction, Faction enemyFaction) {
+        startNewGameWithLocation(playerFaction, enemyFaction, null, null);
     }
 
-    private void startNewGame(Faction playerFaction, Faction enemyFaction) {
+    private void startNewGameWithLocation(Faction playerFaction, Faction enemyFaction, Double lat, Double lon) {
+        // Generate random location if not provided
+        double latitude = lat != null ? lat : (Math.random() * 160 - 80); // -80 to 80 (valid lat range)
+        double longitude = lon != null ? lon : (Math.random() * 360 - 180); // -180 to 180 (valid lon range)
+        
+        try {
+            if (!GoogleMapsClient.getApiKey().isEmpty()) {
+                // Use satellite terrain for RTS
+                int gameW = 28, gameH = 20;
+                GoogleMapsClient.SatelliteImage satImg = GoogleMapsClient.downloadSatelliteImage(
+                    latitude, longitude, 16, 512);
+                SatelliteImageProcessor.SatelliteTerrainData terrainData = 
+                    SatelliteImageProcessor.processSatelliteImage(satImg.data(), gameW, gameH);
+                
+                ctrl = new GameController();
+                ctrl.onUpdate = this::refreshAll;
+                ctrl.setPlayerFaction(playerFaction);
+                ctrl.enemyFaction = enemyFaction;
+                
+                GameState state = new GameState();
+                state.latitude = latitude;
+                state.longitude = longitude;
+                state.locationName = String.format("%.4f, %.4f", latitude, longitude);
+                state.playerFaction = playerFaction;
+                state.enemyFaction = enemyFaction;
+                state.elevation = terrainData.elevation();
+                state.moisture = terrainData.moisture();
+                state.commandMode = CommandMode.DOCTRINE;
+                state.factionDoctrines.put(playerFaction, Doctrine.NATO);
+                state.factionDoctrines.put(enemyFaction, Doctrine.RUSSIAN);
+                
+                Tile[][] grid = new Tile[gameH][gameW];
+                Terrain[][] classedTerrain = terrainData.terrain();
+                for (int y = 0; y < gameH; y++) {
+                    for (int x = 0; x < gameW; x++) {
+                        grid[y][x] = new Tile(classedTerrain[y][x], x, y);
+                    }
+                }
+                state.grid = grid;
+                state.ensureVisibility();
+                
+                // Place units
+                int id = 1;
+                int px = 2, py = gameH / 2;
+                Unit u1 = spawnUnit(state, "mbt", playerFaction, px, py, id++, ctrl.profiles);
+                if (u1 != null) { u1.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u1); }
+                Unit u2 = spawnUnit(state, "ifv", playerFaction, px, py, id++, ctrl.profiles);
+                if (u2 != null) { u2.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u2); }
+                Unit u3 = spawnUnit(state, "inf_squad", playerFaction, px, py, id++, ctrl.profiles);
+                if (u3 != null) { u3.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u3); }
+                
+                int ex = gameW - 3, ey = gameH / 2;
+                Unit u4 = spawnUnit(state, "mbt", enemyFaction, ex, ey, id++, ctrl.profiles);
+                if (u4 != null) { u4.applyDoctrine(Doctrine.RUSSIAN); state.enemyUnits.add(u4); }
+                Unit u5 = spawnUnit(state, "inf_squad", enemyFaction, ex, ey, id++, ctrl.profiles);
+                if (u5 != null) { u5.applyDoctrine(Doctrine.RUSSIAN); state.enemyUnits.add(u5); }
+                
+                state.objectives.add(new com.contactfront.engine.model.Objective("OBJ1", "Secure Area", gameW/2, gameH/2, "capture"));
+                
+                ctrl.state = state;
+                ctrl.seed = System.currentTimeMillis();
+                ctrl.engine = new TacticalEngine(ctrl.state, new Random(ctrl.seed ^ 0x5151));
+                ctrl.engine.start();
+                
+                showGame();
+                return;
+            }
+        } catch (Exception e) {
+            System.err.println("Satellite terrain load failed: " + e.getMessage());
+        }
+        
+        // Fallback to procedural terrain
         ctrl = new GameController();
         ctrl.onUpdate = this::refreshAll;
         ctrl.setPlayerFaction(playerFaction);
         ctrl.enemyFaction = enemyFaction;
-
-        mapView = new MapView(ctrl, 30);
-        sidePanel = new SidePanel(ctrl);
-        topStatus = new TopStatus();
-        eventLog = new EventLog();
-        contacts = new ContactsPanel();
-
-        ScrollPane mapScroll = mapView.scrollPane();
-        mapScroll.setStyle("-fx-background-color:#0e1117;");
-
-        VBox right = new VBox(sidePanel.node(), contacts.node());
-
-        BorderPane bp = new BorderPane();
-        bp.setTop(buildTopBar());
-        bp.setCenter(mapScroll);
-        bp.setRight(right);
-        bp.setBottom(eventLog.node());
-        bp.setPadding(new Insets(8));
-        bp.setStyle("-fx-background-color:#0e1117;");
-
-        sceneRoot.getChildren().add(bp);
-        Scene scene = new Scene(sceneRoot);
-        primaryStage.setScene(scene);
-        primaryStage.setTitle("Contact Front — Tactical Mode");
-        primaryStage.setMinWidth(1000);
-        primaryStage.setMinHeight(600);
-        primaryStage.centerOnScreen();
         
-        primaryStage.show();
-
-        scene.setOnKeyPressed(e -> handleKey(e));
-        newBattle(new Random().nextLong());
+        ctrl.newGame(System.nanoTime());
+        showGame();
     }
 
     private Node buildTopBar() {
@@ -260,9 +318,21 @@ public class App extends Application {
         Button menuBtn = new Button("Main Menu");
         menuBtn.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
         menuBtn.setOnAction(e -> {
+            if (gameLoop != null) gameLoop.stop();
             sceneRoot.getChildren().clear();
             aarOverlay = null;
             showMainMenu();
+        });
+        
+        Button pauseBtn = new Button("Pause");
+        pauseBtn.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
+        pauseBtn.setOnAction(e -> {
+            if (gameLoop != null) {
+                gameLoop.stop();
+                gameLoop = null;
+            } else {
+                startGameLoop();
+            }
         });
 
         MenuBar menu = new MenuBar();
@@ -273,6 +343,7 @@ public class App extends Application {
         load.setOnAction(e -> doLoad());
         MenuItem exitToMenu = new MenuItem("Exit to Main Menu");
         exitToMenu.setOnAction(e -> {
+            if (gameLoop != null) gameLoop.stop();
             sceneRoot.getChildren().clear();
             aarOverlay = null;
             showMainMenu();
@@ -280,7 +351,7 @@ public class App extends Application {
         game.getItems().addAll(save, load, new MenuItem("---"), exitToMenu);
         menu.getMenus().add(game);
 
-        HBox bar = new HBox(10, menuBtn, new Label("Seed:"), seedField, newBtn, menu,
+        HBox bar = new HBox(10, menuBtn, pauseBtn, new Label("Seed:"), seedField, newBtn, menu,
                 new Label("  L-drag=select · R-click=order · wheel=zoom · 1-9=groups (Ctrl+#=assign) · S=smoke · A=arty"));
         bar.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
         bar.setPadding(new Insets(4, 8, 4, 8));
@@ -299,7 +370,7 @@ public class App extends Application {
 
     private void refreshAll() {
         mapView.redraw();
-        sidePanel.update();
+        sidePanel.update(ctrl.state);
         topStatus.update(ctrl.state);
         eventLog.update(ctrl.state);
         contacts.update(ctrl.state);
@@ -376,67 +447,62 @@ public class App extends Application {
     }
 
     private void showScenarioBuilder() {
-        ScenarioBuilder builder = new ScenarioBuilder(primaryStage, this::handleScenarioCreated, terrain -> {
-            ctrl.state.log("Terrain selected: " + terrain.name());
+        GameController editorCtrl = new GameController();
+        ScenarioEditor editor = new ScenarioEditor(primaryStage, editorCtrl, data -> {
+            handleScenarioCreated(data);
         });
-        builder.show();
+        editor.show();
     }
 
-    private void handleScenarioCreated(ScenarioBuilder.ScenarioBuilderData data) {
-        ctrl.state.latitude = data.latitude();
-        ctrl.state.longitude = data.longitude();
-        ctrl.state.locationName = data.locationName();
-        ctrl.state.mode = "scenario_builder";
+    private void handleScenarioCreated(ScenarioEditor.ScenarioEditorData data) {
+        ctrl = new GameController();
+        ctrl.onUpdate = this::refreshAll;
+        ctrl.state = data.state;
+        ctrl.state.mode = "scenario_editor";
         ctrl.state.commandMode = data.commandMode();
+        ctrl.state.playerFaction = data.playerFaction();
+        ctrl.state.enemyFaction = data.enemyFaction();
         ctrl.state.factionDoctrines.put(data.playerFaction(), data.playerDoctrine());
         ctrl.state.factionDoctrines.put(data.enemyFaction(), data.enemyDoctrine());
-        startNewGame(data.playerFaction(), data.enemyFaction());
+        ctrl.engine = new TacticalEngine(ctrl.state, new Random());
+        ctrl.engine.start();
+        startScenarioGame();
     }
 
-    private void saveScenario() {
-        FileChooser fc = new FileChooser();
-        fc.setTitle("Save Scenario");
-        fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("Scenario Files", "*.json"));
-        fc.setInitialFileName("new_scenario.json");
-        File f = fc.showSaveDialog(primaryStage);
-        if (f == null) return;
-        try {
-            ScenarioSerializer.saveScenario(
-                new ScenarioBuilder.ScenarioBuilderData(
-                    "Saved Scenario", "From editor", 
-                    ctrl.state.playerFaction, ctrl.state.enemyFaction,
-                    ctrl.state.commandMode,
-                    ctrl.state.factionDoctrines.getOrDefault(ctrl.state.playerFaction, Doctrine.NATO),
-                    ctrl.state.factionDoctrines.getOrDefault(ctrl.state.enemyFaction, Doctrine.RUSSIAN),
-                    ctrl.state.locationName, ctrl.state.latitude, ctrl.state.longitude,
-                    ctrl.state.width(), ctrl.state.height(), ""
-                ), ctrl.state, f.toPath());
-        } catch (Exception ex) {
-            ctrl.state.log("Save failed: " + ex.getMessage());
-        }
-    }
+    private void startScenarioGame() {
+        mapView = new MapView(ctrl, 30);
+        sidePanel = new SidePanel(ctrl);
+        topStatus = new TopStatus();
+        eventLog = new EventLog();
+        contacts = new ContactsPanel();
 
-    private void loadScenario() {
-        FileChooser fc = new FileChooser();
-        fc.setTitle("Load Scenario");
-        fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("Scenario Files", "*.json"));
-        File f = fc.showOpenDialog(primaryStage);
-        if (f == null) return;
-        try {
-            ScenarioSerializer.ScenarioLoadResult result = ScenarioSerializer.loadScenario(f.toPath());
-            ctrl.state = result.state();
-            ctrl.state.playerFaction = result.metadata().playerFaction();
-            ctrl.state.enemyFaction = result.metadata().enemyFaction();
-            ctrl.engine = new TacticalEngine(ctrl.state, new Random());
-            ctrl.selected = null;
-            ctrl.mode = com.contactfront.ui.controller.GameController.Mode.NONE;
-            ctrl.staged.clear();
-            ctrl.stagedUnits.clear();
-            if (aarOverlay != null) { sceneRoot.getChildren().remove(aarOverlay); aarOverlay = null; }
-            refreshAll();
-        } catch (Exception ex) {
-            System.err.println("Load failed: " + ex.getMessage());
-        }
+        ScrollPane mapScroll = mapView.scrollPane();
+        mapScroll.setStyle("-fx-background-color:#0e1117;");
+
+        VBox right = new VBox(sidePanel.node(), contacts.node());
+
+        BorderPane bp = new BorderPane();
+        bp.setTop(buildTopBar());
+        bp.setCenter(mapScroll);
+        bp.setRight(right);
+        bp.setBottom(eventLog.node());
+        bp.setPadding(new Insets(8));
+        bp.setStyle("-fx-background-color:#0e1117;");
+
+        sceneRoot.getChildren().clear();
+        sceneRoot.getChildren().add(bp);
+        Scene scene = new Scene(sceneRoot);
+        primaryStage.setScene(scene);
+        primaryStage.setTitle("Contact Front — Scenario Game");
+        primaryStage.setMinWidth(1000);
+        primaryStage.setMinHeight(600);
+        primaryStage.centerOnScreen();
+
+        primaryStage.show();
+
+        scene.setOnKeyPressed(e -> handleKey(e));
+        startGameLoop();
+        refreshAll();
     }
 
     public static void main(String[] args) {

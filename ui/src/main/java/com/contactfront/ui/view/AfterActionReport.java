@@ -24,12 +24,12 @@ public final class AfterActionReport {
                 + "; -fx-font-size:18px; -fx-font-weight:bold;");
 
         Label stats = new Label(
-                "Turns: " + s.turn + "\n" +
+                "Time: " + (s.elapsedMs / 1000) + "s\n" +
                 "Enemy KIA: " + s.enemyKia + "\n" +
                 "Friendly KIA: " + s.friendlyKia + "\n" +
                 "Vehicles lost: " + s.vehiclesLost + "\n" +
                 "Ammo expended: " + s.ammoExpended + "\n" +
-                "Turns under suppression: " + s.turnsUnderSuppression);
+                "Time under suppression: " + (s.turnsUnderSuppression * 500) + "ms");
         stats.setStyle("-fx-text-fill:#e0e6ed;");
 
         Button again = new Button("New Battle");

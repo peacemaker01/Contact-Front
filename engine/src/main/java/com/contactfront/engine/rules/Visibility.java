@@ -27,7 +27,7 @@ public final class Visibility {
                     f.lastContactName = e.profile.name();
                     f.lastContactX = e.x;
                     f.lastContactY = e.y;
-                    f.lastContactTurn = s.turn;
+                    f.lastContactElapsedMs = s.elapsedMs;
                 }
             }
         }
@@ -39,9 +39,9 @@ public final class Visibility {
                 e.knownToPlayer = true;
                 e.lastKnownX = e.x;
                 e.lastKnownY = e.y;
-                e.lastSeenTurn = s.turn;
-            } else if (e.knownToPlayer && e.lastSeenTurn < s.turn) {
-                s.log("intel", "Lost contact: " + e.profile.name() + " last seen (" + e.lastKnownX + "," + e.lastKnownY + ") T" + e.lastSeenTurn + ".");
+                e.lastSeenTurn = (int) (s.elapsedMs / 1000);
+            } else if (e.knownToPlayer && e.lastSeenTurn < s.elapsedMs / 1000) {
+                s.log("intel", "Lost contact: " + e.profile.name() + " last seen (" + e.lastKnownX + "," + e.lastKnownY + ").");
             }
         }
     }

@@ -64,7 +64,7 @@ public class EventLog {
             for (int i = start; i < s.eventLog.size(); i++) {
                 GameState.LogEntry e = s.eventLog.get(i);
                 if (filter.equals("all") || filter.equals(e.channel)) {
-                    Text t = new Text("• [" + e.channel.substring(0,3).toUpperCase() + " T" + e.turn + "] " + e.text);
+                    Text t = new Text("• [" + e.channel.substring(0,3).toUpperCase() + " " + (e.elapsedMs / 1000) + "s] " + e.text);
                     t.setFont(Font.font("Consolas", 12));
                     t.setFill(channelColor(e.channel));
                     box.getChildren().add(t);

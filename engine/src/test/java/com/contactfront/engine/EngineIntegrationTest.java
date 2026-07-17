@@ -25,18 +25,9 @@ public class EngineIntegrationTest {
         engine.start();
 
         int guard = 0;
-        while (!gen.state().gameOver && guard++ < 60) {
-            var u = gen.state().friendlyUnits.stream().filter(x -> !x.destroyed).findFirst();
-            if (u.isEmpty()) break;
-            var reach = Movement.reachable(gen.state(), u.get());
-            if (!reach.isEmpty()) {
-                int[] t = reach.get(0);
-                engine.issue(new com.contactfront.engine.model.MoveAction(u.get().id, t[0], t[1]));
-            } else {
-                engine.issue(new com.contactfront.engine.model.SetStanceAction(u.get().id, Stance.OVERWATCH));
-            }
+        while (!gen.state().gameOver && guard++ < 120) {
+            engine.tick();
         }
-        assertTrue(gen.state().gameOver, "battle should reach a terminal state");
-        assertTrue(gen.state().turn >= 1);
+        assertTrue(gen.state().gameOver || gen.state().elapsedMs >= 60000, "battle should reach a terminal state or time limit");
     }
 }

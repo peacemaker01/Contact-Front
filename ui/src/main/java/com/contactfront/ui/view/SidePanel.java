@@ -25,7 +25,6 @@ public class SidePanel {
     private final Button bResupply = new Button("Resupply");
     private final Button bArty = new Button("Call Arty");
     private final Button bCas = new Button("Call CAS");
-    private final Button bEnd = new Button("End Turn");
     private final HBox groupRow = new HBox(2);
     private final Label contactLine = new Label("");
 
@@ -53,7 +52,6 @@ public class SidePanel {
         bResupply.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
         bArty.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
         bCas.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
-        bEnd.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
 
         bMove.setOnAction(e -> ctrl.beginMove());
         bAttack.setOnAction(e -> ctrl.beginAttack());
@@ -61,7 +59,6 @@ public class SidePanel {
         bResupply.setOnAction(e -> ctrl.resupply());
         bArty.setOnAction(e -> ctrl.beginArty());
         bCas.setOnAction(e -> ctrl.beginCas());
-        bEnd.setOnAction(e -> ctrl.endTurn());
 
         for (int n = 1; n <= 9; n++) {
             final int nn = n;
@@ -75,7 +72,7 @@ public class SidePanel {
         VBox root = new VBox(8, title, sub, bars,
                 new Label("Stance"), stances,
                 new Label("Groups  (Ctrl+# = assign, # = recall)"), groupRow,
-                new Label("Orders"), orders, contactLine, bEnd);
+                new Label("Orders"), orders, contactLine);
         root.setPadding(new Insets(10));
         root.setStyle("-fx-background-color:#151a23; -fx-border-color:#3a5067;");
         root.setPrefWidth(240);
@@ -106,7 +103,7 @@ public class SidePanel {
         return tb;
     }
 
-    public void update() {
+    public void update(GameState s) {
         Unit u = ctrl.selected;
         boolean act = ctrl.canAct();
         int selCount = ctrl.selection.size();
@@ -156,17 +153,18 @@ public class SidePanel {
 
     private void updateContactLine(Unit u) {
         contactLine.setVisible(true);
-        if (u.lastContactTurn < 0) {
+        if (u.lastContactElapsedMs < 0) {
             contactLine.setText("Last contact: none");
             contactLine.setStyle("-fx-text-fill:#8695aa; -fx-font-size:11px;");
             return;
         }
-        boolean live = u.lastContactTurn == ctrl.state.turn
+        long elapsedThresh = ctrl.state.elapsedMs - 3000; // 3s threshold for live contact
+        boolean live = u.lastContactElapsedMs >= elapsedThresh
                 && u.lastContactX >= 0 && u.lastContactY >= 0
                 && u.lastContactY < ctrl.state.visibility.length
                 && u.lastContactX < ctrl.state.visibility[0].length
                 && ctrl.state.visibility[u.lastContactY][u.lastContactX] == Visibility.VISIBLE;
-        String text = "Last contact: " + u.lastContactName + " @ (" + u.lastContactX + "," + u.lastContactY + ")  T" + u.lastContactTurn
+        String text = "Last contact: " + u.lastContactName + " @ (" + u.lastContactX + "," + u.lastContactY + ")  " + (ctrl.state.elapsedMs - u.lastContactElapsedMs) / 1000 + "s ago"
                 + (live ? "" : "  (stale)");
         contactLine.setText(text);
         contactLine.setStyle("-fx-font-size:11px; -fx-text-fill:"
