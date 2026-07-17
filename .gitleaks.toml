@@ -1,0 +1,12 @@
+title = "Contact Front — gitleaks rules"
+
+# Fail the scan on any finding by default.
+[extend]
+# Use the built-in gitleaks baseline rules plus our project tweaks below.
+path = "https://github.com/gitleaks/gitleaks/releases/download/v8.18.0/gitleaks.toml"
+
+[[rules]]
+id = "contactfront-openrouter-key"
+description = "OpenRouter / OpenAI-style sk-... API key"
+regex = '''sk-[a-zA-Z0-9]{20,}'''
+tags = ["contactfront", "api-key", "openrouter"]

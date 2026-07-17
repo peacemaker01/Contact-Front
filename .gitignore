@@ -1,34 +1,42 @@
-# Environment
+# ---- Java / Maven ----
+target/
+build/
+.idea/
+*.class
+*.jar
+*.war
+*.ear
+dependency-reduced-pom.xml
+.mvn/
+
+# ---- OS / editor ----
+*.log
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# ---- Secrets (never commit) ----
 .env
 .env.*
 *.env
+secrets/
+**/.env
 
-# Python
+# ---- Legacy Python (this repo was a Python prototype; Java is the v1 app) ----
 __pycache__/
 *.py[cod]
-*.pyo
-*.so
-.Python
 venv/
 .venv/
 ENV/
-env/
+newach/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
+# ---- Build/packaging output ----
+dist/
+contact-front-ui/target/
+contact-front-ui/src/main/resources/engine/
 
-# Logs & data
-*.log
-*.sqlite
-*.db
+# ---- Local data ----
 saves/
-
-# Temporary files
 *.tmp
 *.bak
-newach/

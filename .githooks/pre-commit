@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Contact Front pre-commit secret scan.
+# Installs via: git config core.hooksPath .githooks   (or use `pre-commit install`)
+# Requires `gitleaks` on PATH. If gitleaks is missing the hook WARNs but does
+# not block, so local dev is never hard-blocked by a missing tool.
+set -euo pipefail
+
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --redact --staged --no-banner \
+    --config "$(git rev-parse --show-toplevel)/.gitleaks.toml" \
+    && echo "gitleaks: no secrets detected." \
+    || { echo "gitleaks: secrets detected — commit aborted."; exit 1; }
+else
+  echo "gitleaks not installed; skipping secret scan (install gitleaks to enforce)."
+fi
