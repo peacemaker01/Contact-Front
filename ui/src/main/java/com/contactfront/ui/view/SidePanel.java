@@ -20,8 +20,6 @@ public class SidePanel {
     private final ProgressBar morale = new ProgressBar();
     private final ProgressBar suppress = new ProgressBar();
     private final ToggleGroup stanceGroup = new ToggleGroup();
-    private final Button bMove = new Button("Move");
-    private final Button bAttack = new Button("Attack");
     private final Button bRecon = new Button("Recon");
     private final Button bResupply = new Button("Resupply");
     private final Button bArty = new Button("Call Arty");
@@ -40,26 +38,22 @@ public class SidePanel {
         bars.setPadding(new Insets(6));
 
         HBox stances = new HBox(4,
-                stanceBtn("Aggressive", Stance.AGGRESSIVE),
-                stanceBtn("Defensive", Stance.DEFENSIVE),
-                stanceBtn("Overwatch", Stance.OVERWATCH));
+                stanceBtn("Agg", Stance.AGGRESSIVE),
+                stanceBtn("Def", Stance.DEFENSIVE),
+                stanceBtn("Over", Stance.OVERWATCH));
 
-        VBox orders = new VBox(4, bMove, bAttack, bRecon, bResupply, bArty, bCas);
+        VBox orders = new VBox(4, bRecon, bResupply, bArty, bCas);
         orders.setPadding(new Insets(6));
 
-        bMove.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
-        bAttack.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
         bRecon.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
         bResupply.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
         bArty.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
         bCas.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
 
-        bMove.setOnAction(e -> ctrl.beginMove());
-        bAttack.setOnAction(e -> ctrl.beginAttack());
         bRecon.setOnAction(e -> ctrl.recon());
         bResupply.setOnAction(e -> ctrl.resupply());
-        bArty.setOnAction(e -> ctrl.beginArty());
-        bCas.setOnAction(e -> ctrl.beginCas());
+        bArty.setDisable(true);
+        bCas.setDisable(true);
 
         for (int n = 1; n <= 9; n++) {
             final int nn = n;
@@ -85,8 +79,8 @@ public class SidePanel {
     private Node node;
 
     private HBox labeled(String name, ProgressBar bar) {
-        bar.setPrefWidth(150);
-        return new HBox(8, new Label(name) {{ setStyle("-fx-text-fill:#8695aa;"); setPrefWidth(80); }}, bar);
+        bar.setPrefWidth(120);
+        return new HBox(8, new Label(name) {{ setStyle("-fx-text-fill:#8695aa;"); setMinWidth(70); setMaxWidth(70); }}, bar);
     }
 
     private ToggleButton stanceBtn(String name, Stance s) {
@@ -133,11 +127,10 @@ public class SidePanel {
                     .filter(t -> ((ToggleButton) t).getText().equalsIgnoreCase(u.stance.name()))
                     .forEach(t -> ((ToggleButton) t).setSelected(true));
         }
-        bMove.setDisable(!act);
-        bAttack.setDisable(!act);
         bRecon.setDisable(!act);
         bResupply.setDisable(!act);
         bCas.setDisable(!act);
+        bArty.setDisable(!act);
     }
 
     private void setBarsVisible(boolean v) {
@@ -159,7 +152,7 @@ public class SidePanel {
             contactLine.setStyle("-fx-text-fill:#8695aa; -fx-font-size:11px;");
             return;
         }
-        long elapsedThresh = ctrl.state.elapsedMs - 3000; // 3s threshold for live contact
+        long elapsedThresh = ctrl.state.elapsedMs - 3000;
         boolean live = u.lastContactElapsedMs >= elapsedThresh
                 && u.lastContactX >= 0 && u.lastContactY >= 0
                 && u.lastContactY < ctrl.state.visibility.length

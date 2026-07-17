@@ -47,6 +47,7 @@ public class MapView {
         this.onMapClick = onMapClick;
         this.canvas = new Canvas();
         this.stack = new StackPane(canvas);
+        this.stack.setAlignment(javafx.geometry.Pos.TOP_LEFT);
         this.scroll = new javafx.scene.control.ScrollPane(stack);
         this.scroll.setStyle("-fx-background-color:#0e1117;");
         this.scroll.setPannable(false);
@@ -474,11 +475,12 @@ public class MapView {
     }
 
     private void drawGhosts(GraphicsContext g, GameState s, int ts) {
-        for (var a : ctrl.staged) {
-            g.setLineWidth(1.5);
+        for (var order : s.delayedOrders) {
+            var a = order.command;
             if (a instanceof MoveAction m) {
                 Unit u = s.friendlyById(m.unitId());
                 if (u == null) continue;
+                g.setLineWidth(1.5);
                 g.setStroke(Color.web("#d1a34f", 0.5));
                 g.strokeLine(u.x * ts + ts / 2, u.y * ts + ts / 2, m.targetX() * ts + ts / 2, m.targetY() * ts + ts / 2);
                 g.strokeRect(m.targetX() * ts + 4, m.targetY() * ts + 4, ts - 8, ts - 8);
@@ -486,21 +488,25 @@ public class MapView {
                 Unit u = s.friendlyById(at.unitId());
                 Unit e = s.enemyById(at.targetUnitId());
                 if (u == null || e == null) continue;
+                g.setLineWidth(1.5);
                 g.setStroke(Color.web("#d1594f", 0.55));
                 g.strokeLine(u.x * ts + ts / 2, u.y * ts + ts / 2, e.x * ts + ts / 2, e.y * ts + ts / 2);
                 reticle(g, e.x * ts + ts / 2, e.y * ts + ts / 2, ts / 2 - 3);
             } else if (a instanceof ReconAction rc) {
                 Unit u = s.friendlyById(rc.unitId());
                 if (u == null) continue;
+                g.setLineWidth(1.5);
                 g.setStroke(Color.web("#6fbf73", 0.5));
                 g.strokeOval(u.x * ts + ts / 2 - rc.radius() * ts, u.y * ts + ts / 2 - rc.radius() * ts,
                              rc.radius() * 2 * ts, rc.radius() * 2 * ts);
             } else if (a instanceof CallCasAction c) {
+                g.setLineWidth(1.5);
                 g.setStroke(Color.web("#d1594f", 0.5));
                 reticle(g, c.targetX() * ts + ts / 2, c.targetY() * ts + ts / 2, ts / 2 - 3);
             } else if (a instanceof ResupplyAction rs) {
                 Unit u = s.friendlyById(rs.unitId());
                 if (u == null) continue;
+                g.setLineWidth(1.5);
                 g.setStroke(Color.web("#6fbf73", 0.5));
                 g.strokeRect(u.x * ts + 6, u.y * ts + 6, ts - 12, ts - 12);
             }

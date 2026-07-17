@@ -14,11 +14,11 @@ public class ProfilesTest {
     @Test
     void loadsRosterFromJson() {
         Profiles p = Profiles.load();
-        assertTrue(p.hasWeapon("rifle_556"));
-        assertTrue(p.hasUnit("mbt"));
-        assertEquals(UnitCategory.ARMOR, p.unit("mbt").category());
-        assertEquals(ArmorClass.HEAVY, p.unit("mbt").armorClass());
-        assertEquals(DamageClass.AT, p.weapon("at4_84mm").damageClass());
+        assertTrue(p.hasWeapon("m4"));
+        assertTrue(p.hasUnit("m1a2_abrams"));
+        assertEquals(UnitCategory.ARMOR, p.unit("m1a2_abrams").category());
+        assertEquals(ArmorClass.HEAVY, p.unit("m1a2_abrams").armorClass());
+        assertEquals(DamageClass.AT, p.weapon("at4").damageClass());
     }
 
     @Test
@@ -31,9 +31,9 @@ public class ProfilesTest {
     }
 
     @Test
-    void manpadsTargetsAirOnly() {
+    void iglaTargetsAirOnly() {
         Profiles p = Profiles.load();
-        assertTrue(p.weapon("manpads").canTarget(com.contactfront.engine.model.TargetType.AIR));
-        assertFalse(p.weapon("manpads").canTarget(com.contactfront.engine.model.TargetType.GROUND));
+        assertTrue(p.weapon("igla_9m310").canTarget(com.contactfront.engine.model.TargetType.AIR));
+        assertFalse(p.weapon("igla_9m310").canTarget(com.contactfront.engine.model.TargetType.GROUND));
     }
 }

@@ -15,24 +15,33 @@ public final class ScenarioGenerator {
 
     private static final Map<String, Integer> COST = new HashMap<>();
     static {
+        COST.put("m1a2_abrams", 6);
+        COST.put("t90m", 6);
+        COST.put("bradley", 5);
+        COST.put("bmp3", 5);
         COST.put("inf_squad", 2);
-        COST.put("mech_inf", 3);
-        COST.put("recon_team", 3);
-        COST.put("mbt", 6);
-        COST.put("ifv", 5);
-        COST.put("mortar_section", 3);
-        COST.put("fpv_unit", 3);
+        COST.put("motostrelki", 3);
+        COST.put("recon_squad", 3);
+        COST.put("btr82a", 3);
+        COST.put("mortar_team", 3);
+        COST.put("d30_battery", 4);
+        COST.put("msta_battery", 4);
+        COST.put("fpv_squad", 3);
+        COST.put("shahed_squad", 3);
         COST.put("engineer_squad", 3);
-        COST.put("aa_team", 3);
+        COST.put("sapper_team", 3);
+        COST.put("strela_team", 3);
+        COST.put("igla_team", 3);
+        COST.put("pantsir_battery", 5);
         COST.put("supply_truck", 2);
     }
 
     private static final List<String> PLAYER_POOL = List.of(
-            "mbt", "ifv", "inf_squad", "mech_inf", "recon_team",
-            "mortar_section", "fpv_unit", "engineer_squad", "aa_team", "supply_truck");
+            "m1a2_abrams", "bradley", "inf_squad", "btr82a",
+            "mortar_team", "fpv_squad", "engineer_squad", "strela_team", "supply_truck");
     private static final List<String> ENEMY_POOL = List.of(
-            "mbt", "ifv", "inf_squad", "mech_inf", "recon_team",
-            "mortar_section", "fpv_unit", "engineer_squad", "aa_team", "supply_truck");
+            "t90m", "bmp3", "motostrelki", "btr82a",
+            "mortar_team", "d30_battery", "fpv_squad", "shahed_squad", "sapper_team", "igla_team", "supply_truck");
 
     public record ScenarioSpec(
             long seed,

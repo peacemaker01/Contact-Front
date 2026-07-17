@@ -44,6 +44,11 @@ public class GameState {
     /** Normalized 0..1 moisture field (M13 baking). Null when not generated. */
     public double[][] moisture;
 
+    /** OSM-derived road segments for semantic grid overlay. */
+    public final List<RoadSegment> roadSegments = new ArrayList<>();
+    /** OSM-derived building footprints for 3D extrusion. */
+    public final List<Building> buildings = new ArrayList<>();
+
     public static final class LogEntry {
         public final String channel;
         public final String text;

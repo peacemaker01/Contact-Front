@@ -123,6 +123,38 @@ public final class SaveManager {
         for (String l : s.narrativeLog) log.put(l);
         root.put("log", log);
 
+        JSONArray roads = new JSONArray();
+        for (RoadSegment r : s.roadSegments) {
+            JSONArray pts = new JSONArray();
+            for (double[] pt : r.points()) {
+                JSONObject p = new JSONObject();
+                p.put("lon", pt[0]);
+                p.put("lat", pt[1]);
+                pts.put(p);
+            }
+            JSONObject road = new JSONObject();
+            road.put("type", r.type().name());
+            road.put("points", pts);
+            roads.put(road);
+        }
+        root.put("roadSegments", roads);
+
+        JSONArray buildings = new JSONArray();
+        for (Building b : s.buildings) {
+            JSONArray pts = new JSONArray();
+            for (double[] pt : b.footprint) {
+                JSONObject p = new JSONObject();
+                p.put("lon", pt[0]);
+                p.put("lat", pt[1]);
+                pts.put(p);
+            }
+            JSONObject building = new JSONObject();
+            building.put("height", b.height);
+            building.put("footprint", pts);
+            buildings.put(building);
+        }
+        root.put("buildings", buildings);
+
         try (FileWriter fw = new FileWriter(file)) { fw.write(root.toString(2)); }
     }
 
@@ -223,6 +255,34 @@ public final class SaveManager {
 
         JSONArray log = root.getJSONArray("log");
         for (Object l : log) s.narrativeLog.add(l.toString());
+
+        if (root.has("roadSegments")) {
+            JSONArray roads = root.getJSONArray("roadSegments");
+            for (Object o : roads) {
+                JSONObject roadJson = (JSONObject) o;
+                JSONArray pts = roadJson.getJSONArray("points");
+                List<double[]> points = new ArrayList<>();
+                for (int i = 0; i < pts.length(); i++) {
+                    JSONObject p = pts.getJSONObject(i);
+                    points.add(new double[]{p.getDouble("lon"), p.getDouble("lat")});
+                }
+                s.roadSegments.add(new RoadSegment(points, RoadSegment.RoadType.valueOf(roadJson.getString("type"))));
+            }
+        }
+
+        if (root.has("buildings")) {
+            JSONArray buildings = root.getJSONArray("buildings");
+            for (Object o : buildings) {
+                JSONObject bldgJson = (JSONObject) o;
+                JSONArray pts = bldgJson.getJSONArray("footprint");
+                List<double[]> footprint = new ArrayList<>();
+                for (int i = 0; i < pts.length(); i++) {
+                    JSONObject p = pts.getJSONObject(i);
+                    footprint.add(new double[]{p.getDouble("lon"), p.getDouble("lat")});
+                }
+                s.buildings.add(new Building(footprint, bldgJson.optDouble("height", 10.0)));
+            }
+        }
 
         return new Loaded(s, seed);
     }

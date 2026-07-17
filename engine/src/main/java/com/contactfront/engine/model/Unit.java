@@ -72,6 +72,10 @@ public final class Unit {
         this.baseAccuracy = profile.baseAccuracy();
     }
 
+    public UnitCategory category() {
+        return profile.category();
+    }
+
     public char typeCode() {
         return profile.category().glyph();
     }

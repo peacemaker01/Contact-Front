@@ -15,7 +15,7 @@ public class ScenarioGenerationTest {
 
     private ScenarioSpec spec() {
         return new ScenarioSpec(12345L, 28, 20, Faction.USA, Faction.RUSSIA,
-                22, 22, List.of("aa_team"),
+                22, 22, List.of("igla_team"),
                 List.of("river_crossing", "settlement"), 60);
     }
 
@@ -55,7 +55,7 @@ public class ScenarioGenerationTest {
             }
         assertTrue(hasRiver, "must contain a river crossing");
         assertTrue(hasSettlement, "must contain a settlement");
-        assertTrue(g.state().enemyUnits.stream().anyMatch(u -> u.profile.id().equals("aa_team")),
+        assertTrue(g.state().enemyUnits.stream().anyMatch(u -> u.profile.id().equals("igla_team") || u.profile.id().equals("strela_team")),
                 "defender force must include an AA unit; got=" + g.state().enemyUnits.stream().map(u -> u.profile.id()).toList());
         assertFalse(g.state().objectives.isEmpty());
     }

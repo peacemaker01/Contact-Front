@@ -38,6 +38,7 @@ public final class TacticalEngine {
         Suppression.tick(state);
         state.tickSmoke();
         checkResupply();
+        Director.evaluate(state, state.turn);
         com.contactfront.engine.rules.Visibility.computePlayerVisibility(state);
         Objectives.check(state);
     }
@@ -147,7 +148,7 @@ public final class TacticalEngine {
     /** Resolve a full player turn: apply every staged order, then the enemy turn. */
     public ActionResult resolvePlayerTurn(java.util.List<Action> actions) {
         if (state.gameOver) return ActionResult.reject("game over");
-        processDelayedOrders();
+        processDelayedOrders(state, rng);
         state.log("orders", "Player committed " + actions.size() + " order(s) — turn " + state.turn + ".");
         for (Action a : actions) {
             resolveAction(a, false);
@@ -155,7 +156,7 @@ public final class TacticalEngine {
         }
         if (!state.gameOver) {
             AiTurn.run(state, rng);
-            processDelayedOrders();
+            processDelayedOrders(state, rng);
             if (state.turn % 5 == 0) Resupply.resupplyPhase(state);
             Suppression.tick(state);
             state.tickSmoke();

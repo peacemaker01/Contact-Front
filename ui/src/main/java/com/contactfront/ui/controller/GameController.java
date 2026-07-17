@@ -3,29 +3,23 @@ package com.contactfront.ui.controller;
 import com.contactfront.engine.TacticalEngine;
 import com.contactfront.engine.data.Profiles;
 import com.contactfront.engine.model.*;
+import com.contactfront.engine.rules.LineOfSight;
 import com.contactfront.engine.rules.Movement;
 import com.contactfront.engine.terrain.ScenarioGenerator;
 import com.contactfront.engine.terrain.ScenarioGenerator.ScenarioSpec;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 public class GameController {
-    public enum Mode { NONE, MOVE, ATTACK, CAS, SMOKE, ARTY }
-
     public GameState state;
     public TacticalEngine engine;
     public Profiles profiles;
     public Unit selected;
-    public Mode mode = Mode.NONE;
-    public final List<Action> staged = new ArrayList<>();
-    public final Set<Integer> stagedUnits = new HashSet<>();
     public final List<Unit> selection = new ArrayList<>();
     public final Map<Integer, List<Integer>> groups = new HashMap<>();
     public long seed;
@@ -33,10 +27,16 @@ public class GameController {
     public Faction playerFaction = Faction.USA;
     public Faction enemyFaction = Faction.RUSSIA;
 
-    private void syncSelected() { selected = selection.isEmpty() ? null : selection.get(0); }
+    private void syncSelected() { if (selection.isEmpty()) selected = null; else selected = selection.get(0); }
 
     public void setPlayerFaction(Faction faction) {
         this.playerFaction = faction;
+    }
+
+    public void clearSelection() {
+        selection.clear();
+        selected = null;
+        refresh();
     }
 
     public void newGame(long seed) {
@@ -52,22 +52,53 @@ public class GameController {
         selected = null;
         selection.clear();
         groups.clear();
-        mode = Mode.NONE;
-        staged.clear();
-        stagedUnits.clear();
         refresh();
     }
 
     public void click(int tx, int ty) {
         if (tx < 0 || ty < 0 || tx >= state.width() || ty >= state.height()) return;
-        switch (mode) {
-            case MOVE -> stageMove(tx, ty);
-            case ATTACK -> stageAttack(tx, ty);
-            case CAS -> stageCas(tx, ty);
-            case SMOKE -> stageSmoke(tx, ty);
-            case ARTY -> stageArty(tx, ty);
-            default -> selectAt(tx, ty);
+        if (selection.isEmpty()) {
+            selectAt(tx, ty);
+            return;
         }
+        // In real-time mode, execute instantly (no staging)
+        Unit enemy = state.enemyUnitAt(tx, ty);
+        Unit friendly = state.friendlyUnitAt(tx, ty);
+        if (enemy != null && enemy.knownToPlayer && !enemy.destroyed) {
+            for (Unit u : selection) {
+                if (LineOfSight.hasLineOfSight(u.x, u.y, enemy.x, enemy.y, state)) {
+                    int dist = Math.abs(u.x - enemy.x) + Math.abs(u.y - enemy.y);
+                    boolean inRange = false;
+                    for (Weapon w : u.weapons) {
+                        if (w.ammo > 0 && w.profile.range() >= dist && w.profile.canTarget(TargetType.GROUND)) {
+                            inRange = true;
+                            break;
+                        }
+                    }
+                    if (inRange) {
+                        engine.resolveAction(new AttackAction(u.id, enemy.id), false);
+                    }
+                }
+            }
+        } else if (friendly != null && friendly.hasSpecial("resupply_source") && !friendly.destroyed) {
+            for (Unit u : selection) {
+                int dist = Math.abs(u.x - friendly.x) + Math.abs(u.y - friendly.y);
+                if (dist <= 1 && u.totalAmmo() < u.weapons.stream().mapToInt(w -> w.maxAmmo).sum()) {
+                    engine.resolveAction(new ResupplyAction(u.id), false);
+                }
+            }
+        } else {
+            int idx = 0;
+            for (Unit u : selection) {
+                int[] dest = spreadTarget(u, tx, ty, idx++);
+                if (dest != null) {
+                    engine.resolveAction(new MoveAction(u.id, dest[0], dest[1]), false);
+                }
+            }
+        }
+        selection.clear();
+        syncSelected();
+        refresh();
     }
 
     private void selectAt(int tx, int ty) {
@@ -79,21 +110,15 @@ public class GameController {
     }
 
     public boolean canAct() {
-        return selected != null && !selected.destroyed && !stagedUnits.contains(selected.id);
+        return selected != null && !selected.destroyed;
     }
 
-    public void beginMove() { if (canAct()) { mode = Mode.MOVE; refresh(); } }
-    public void beginAttack() { if (canAct()) { mode = Mode.ATTACK; refresh(); } }
-    public void beginCas() { if (canAct()) { mode = Mode.CAS; refresh(); } }
-    public void beginSmoke() { if (canAct()) { mode = Mode.SMOKE; refresh(); } }
-    public void beginArty() { if (canAct()) { mode = Mode.ARTY; refresh(); } }
-
     public void recon() {
-        if (canAct()) { staged.add(new ReconAction(selected.id, selected.reconRadius)); markStaged(); }
+        if (canAct()) { engine.resolveAction(new ReconAction(selected.id, selected.reconRadius), false); refresh(); }
     }
 
     public void resupply() {
-        if (canAct()) { staged.add(new ResupplyAction(selected.id)); markStaged(); }
+        if (canAct()) { engine.resolveAction(new ResupplyAction(selected.id), false); refresh(); }
     }
 
     public void setStance(Stance s) {
@@ -103,73 +128,32 @@ public class GameController {
         }
     }
 
-    private void markStaged() {
-        for (Unit u : selection) stagedUnits.add(u.id);
-        mode = Mode.NONE;
-        refresh();
-    }
-
-    private void stageMove(int tx, int ty) {
-        if (!canAct()) return;
-        for (int[] r : Movement.reachable(state, selected)) {
-            if (r[0] == tx && r[1] == ty) {
-                staged.add(new MoveAction(selected.id, tx, ty));
-                markStaged();
-                return;
-            }
+    public void callCas(int tx, int ty) {
+        if (canAct() && state.casAvailable > 0) {
+            engine.resolveAction(new CallCasAction(selected.id, tx, ty), false);
+            refresh();
         }
     }
 
-    private void stageAttack(int tx, int ty) {
-        if (!canAct()) return;
-        Unit e = state.enemyUnitAt(tx, ty);
-        if (e != null && !e.destroyed && e.knownToPlayer) {
-            staged.add(new AttackAction(selected.id, e.id));
-            markStaged();
+    public void callArty(int tx, int ty) {
+        if (canAct() && state.artilleryFiresRemaining > 0) {
+            engine.resolveAction(new CallArtilleryAction(selected.id, tx, ty), false);
+            refresh();
         }
     }
 
-    private void stageCas(int tx, int ty) {
-        if (!canAct()) return;
-        staged.add(new CallCasAction(selected.id, tx, ty));
-        markStaged();
-    }
-
-    private void stageSmoke(int tx, int ty) {
-        if (!canAct()) return;
-        staged.add(new CallSmokeAction(selected.id, tx, ty));
-        markStaged();
-    }
-
-    private void stageArty(int tx, int ty) {
-        if (!canAct()) return;
-        staged.add(new CallArtilleryAction(selected.id, tx, ty));
-        markStaged();
+    public void callSmoke(int tx, int ty) {
+        if (canAct() && state.smokeGrenades > 0) {
+            engine.resolveAction(new CallSmokeAction(selected.id, tx, ty), false);
+            refresh();
+        }
     }
 
     public List<int[]> reachableTiles() {
-        if (mode == Mode.MOVE && canAct()) return Movement.reachable(state, selected);
+        if (selected != null && !selected.destroyed) return Movement.reachable(state, selected);
         return new ArrayList<>();
     }
 
-    public void endTurn() {
-        engine.tick();
-        staged.clear();
-        stagedUnits.clear();
-        mode = Mode.NONE;
-        selected = null;
-        refresh();
-    }
-
-    public void clearSelection() {
-        selection.clear();
-        syncSelected();
-        refresh();
-    }
-
-    // --- M12: RTS interaction layer (selection, groups, context orders) ---
-
-    /** Drag-box select of all friendly units within the tile rectangle. */
     public void selectInBox(int x0, int y0, int x1, int y1) {
         selection.clear();
         for (Unit u : state.friendlyUnits) {
@@ -179,13 +163,11 @@ public class GameController {
         refresh();
     }
 
-    /** Assign the current selection to control group n (1..9). */
     public void assignGroup(int n) {
         groups.put(n, selection.stream().map(u -> u.id).collect(Collectors.toList()));
         refresh();
     }
 
-    /** Recall control group n into the selection. */
     public void recallGroup(int n) {
         List<Integer> ids = groups.get(n);
         selection.clear();
@@ -199,30 +181,48 @@ public class GameController {
         refresh();
     }
 
-    /** Right-click context order on a tile: attack enemy, resupply at logistics, else move. */
     public void contextOrder(int tx, int ty) {
         if (selection.isEmpty() || state == null) return;
         if (tx < 0 || ty < 0 || tx >= state.width() || ty >= state.height()) return;
         Unit enemy = state.enemyUnitAt(tx, ty);
         Unit friendly = state.friendlyUnitAt(tx, ty);
         if (enemy != null && enemy.knownToPlayer && !enemy.destroyed) {
-            for (Unit u : selection) if (!stagedUnits.contains(u.id)) staged.add(new AttackAction(u.id, enemy.id));
-            markStaged();
+            for (Unit u : selection) {
+                if (LineOfSight.hasLineOfSight(u.x, u.y, enemy.x, enemy.y, state)) {
+                    int dist = Math.abs(u.x - enemy.x) + Math.abs(u.y - enemy.y);
+                    boolean inRange = false;
+                    for (Weapon w : u.weapons) {
+                        if (w.ammo > 0 && w.profile.range() >= dist && w.profile.canTarget(TargetType.GROUND)) {
+                            inRange = true;
+                            break;
+                        }
+                    }
+                    if (inRange) {
+                        engine.resolveAction(new AttackAction(u.id, enemy.id), false);
+                    }
+                }
+            }
         } else if (friendly != null && friendly.hasSpecial("resupply_source") && !friendly.destroyed) {
-            for (Unit u : selection) if (!stagedUnits.contains(u.id)) staged.add(new ResupplyAction(u.id));
-            markStaged();
+            for (Unit u : selection) {
+                int dist = Math.abs(u.x - friendly.x) + Math.abs(u.y - friendly.y);
+                if (dist <= 1 && u.totalAmmo() < u.weapons.stream().mapToInt(w -> w.maxAmmo).sum()) {
+                    engine.resolveAction(new ResupplyAction(u.id), false);
+                }
+            }
         } else {
             int idx = 0;
             for (Unit u : selection) {
-                if (stagedUnits.contains(u.id)) continue;
                 int[] dest = spreadTarget(u, tx, ty, idx++);
-                if (dest != null) staged.add(new MoveAction(u.id, dest[0], dest[1]));
+                if (dest != null) {
+                    engine.resolveAction(new MoveAction(u.id, dest[0], dest[1]), false);
+                }
             }
-            markStaged();
         }
+        selection.clear();
+        syncSelected();
+        refresh();
     }
 
-    /** Pick a reachable, free destination near the target so multiple units don't stack. */
     private int[] spreadTarget(Unit u, int tx, int ty, int idx) {
         int[][] off = {{0,0},{1,0},{-1,0},{0,1},{0,-1},{1,1},{-1,-1},{1,-1},{-1,1},{2,0},{-2,0},{0,2},{0,-2}};
         double budget = u.effectiveMovementPoints() * u.stance.moveMult;

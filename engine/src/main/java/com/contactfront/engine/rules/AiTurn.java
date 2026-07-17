@@ -60,15 +60,15 @@ public final class AiTurn {
 
                     double cost = tile.movementCost;
 
-                    if (u.profile.category() == UnitCategory.ARMOR) {
+if (u.profile.category() == UnitCategory.ARMOR) {
                         if (tile.type == Terrain.ROAD || tile.type == Terrain.ROAD_VERT || tile.type == Terrain.ROAD_CROSS) {
                             cost *= 0.5;
                         }
-                        if (tile.blocksLos) {
+                        if (tile.type == Terrain.BUILDING) {
                             cost += 2.0;
                         }
-                    } else if (u.profile.category() == UnitCategory.INFANTRY 
-                            || u.profile.category() == UnitCategory.RECON 
+                    } else if (u.profile.category() == UnitCategory.INFANTRY
+                            || u.profile.category() == UnitCategory.RECON
                             || u.profile.category() == UnitCategory.ENGINEER) {
                         if (u.strength < 50 || u.isSuppressed()) {
                             if (tile.coverBonus > 0) cost *= 0.5;
@@ -164,6 +164,9 @@ public final class AiTurn {
     }
 
     public static void continuousRun(GameState s, Random rng) {
+        // Director evaluation for support assets
+        Director.evaluate(s, s.turn);
+
         for (Unit enemy : new ArrayList<>(s.enemyUnits)) {
             if (enemy.destroyed || enemy.routed) continue;
 
@@ -174,6 +177,13 @@ public final class AiTurn {
                     continue;
                 }
             }
+
+            // Use Director scoring for utility-based decisions
+            var actionScores = Director.scoreUnitActions(s, enemy);
+            String chosenAction = actionScores.stream()
+                .max((a, b) -> Double.compare(a.weight(), b.weight()))
+                .map(Director.ActionScore::action)
+                .orElse("hold_position");
 
             Unit target = closestVisibleFriendly(s, enemy);
             int tx = s.width() / 2;
@@ -191,43 +201,51 @@ public final class AiTurn {
                 int dist = manhattan(enemy.x, enemy.y, target.x, target.y);
                 int bestRange = enemyBestRange(s, enemy);
 
-                if (enemy.profile.category() == UnitCategory.ARMOR) {
+                if (chosenAction.equals("retreat") && enemy.strength < 30) {
+                    int[] retreatPoint = findRetreatPoint(s, enemy);
+                    if (retreatPoint != null) {
+                        tx = retreatPoint[0];
+                        ty = retreatPoint[1];
+                        enemy.stance = Stance.DEFENSIVE;
+                    }
+                } else if (chosenAction.equals("seek_cover") && enemy.isSuppressed()) {
+                    int[] coverTile = findNearestCover(s, enemy);
+                    if (coverTile != null) {
+                        tx = coverTile[0];
+                        ty = coverTile[1];
+                        enemy.stance = Stance.DEFENSIVE;
+                    }
+                } else if (chosenAction.equals("flank") && dist > 3) {
+                    int[] flankPos = findFlankPosition(s, enemy, target);
+                    if (flankPos != null) {
+                        tx = flankPos[0];
+                        ty = flankPos[1];
+                    }
+                } else if (chosenAction.equals("engage")) {
                     if (dist <= bestRange) {
-                        int[] coverTile = findNearbyCoverWithinRange(s, enemy, target, bestRange);
-                        if (coverTile != null) {
-                            tx = coverTile[0];
-                            ty = coverTile[1];
+                        if (enemy.profile.category() == UnitCategory.ARMOR) {
+                            int[] coverTile = findNearbyCoverWithinRange(s, enemy, target, bestRange);
+                            if (coverTile != null) {
+                                tx = coverTile[0];
+                                ty = coverTile[1];
+                            }
+                        } else {
+                            int[] coverTile = findNearestCover(s, enemy);
+                            if (coverTile != null) {
+                                tx = coverTile[0];
+                                ty = coverTile[1];
+                            } else {
+                                tx = target.x;
+                                ty = target.y;
+                            }
                         }
                     } else {
                         tx = target.x;
                         ty = target.y;
                     }
                 } else {
-                    if (enemy.strength < 50 || enemy.isSuppressed()) {
-                        int[] coverTile = findNearestCover(s, enemy);
-                        if (coverTile != null) {
-                            tx = coverTile[0];
-                            ty = coverTile[1];
-                            enemy.stance = Stance.DEFENSIVE;
-                        } else {
-                            tx = target.x;
-                            ty = target.y;
-                        }
-                    } else {
-                        if (enemy.stance != Stance.OVERWATCH) {
-                            Unit overwatchTarget = findOverwatchThreat(s, enemy);
-                            if (overwatchTarget != null && manhattan(enemy.x, enemy.y, overwatchTarget.x, overwatchTarget.y) <= bestRange) {
-                                tx = overwatchTarget.x;
-                                ty = overwatchTarget.y;
-                            } else {
-                                tx = target.x;
-                                ty = target.y;
-                            }
-                        } else {
-                            tx = target.x;
-                            ty = target.y;
-                        }
-                    }
+                    tx = target.x;
+                    ty = target.y;
                 }
             } else if (!s.objectives.isEmpty()) {
                 tx = s.objectives.get(0).x;
@@ -607,6 +625,55 @@ public final class AiTurn {
                 int dist = Math.abs(nx - tx) + Math.abs(ny - ty);
                 if (dist < bestDist) {
                     bestDist = dist;
+                    best = new int[]{nx, ny};
+                }
+            }
+        }
+        return best;
+    }
+
+    private static int[] findRetreatPoint(GameState s, Unit enemy) {
+        int w = s.width(), h = s.height();
+        int[] best = null;
+        int bestDist = Integer.MAX_VALUE;
+        int bestCover = 0;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                Tile t = s.grid[y][x];
+                if (t.impassable()) continue;
+                boolean occupied = false;
+                for (Unit u : s.enemyUnits) if (!u.destroyed && u.x == x && u.y == y) { occupied = true; break; }
+                if (occupied) continue;
+                int dist = manhattan(enemy.x, enemy.y, x, y);
+                if (dist < bestDist || (dist == bestDist && t.coverBonus > bestCover)) {
+                    bestDist = dist;
+                    bestCover = t.coverBonus;
+                    best = new int[]{x, y};
+                }
+            }
+        }
+        return best;
+    }
+
+    private static int[] findFlankPosition(GameState s, Unit enemy, Unit target) {
+        int w = s.width(), h = s.height();
+        int[] best = null;
+        int bestDistToTarget = Integer.MAX_VALUE;
+        for (int dy = -2; dy <= 2; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                int nx = target.x + dx;
+                int ny = target.y + dy;
+                if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                Tile t = s.grid[ny][nx];
+                if (t.impassable()) continue;
+                boolean occupied = false;
+                for (Unit u : s.enemyUnits) if (!u.destroyed && u.x == nx && u.y == ny) { occupied = true; break; }
+                if (occupied) continue;
+                for (Unit u : s.friendlyUnits) if (!u.destroyed && u.x == nx && u.y == ny) { occupied = true; break; }
+                if (occupied) continue;
+                int dist = manhattan(enemy.x, enemy.y, nx, ny);
+                if (dist < bestDistToTarget) {
+                    bestDistToTarget = dist;
                     best = new int[]{nx, ny};
                 }
             }

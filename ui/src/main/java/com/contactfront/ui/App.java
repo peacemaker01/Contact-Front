@@ -11,6 +11,8 @@ import com.contactfront.engine.model.Tile;
 import com.contactfront.engine.model.Unit;
 import com.contactfront.engine.model.UnitProfile;
 import com.contactfront.ui.assets.GoogleMapsClient;
+import com.contactfront.ui.assets.OverpassApiClient;
+import com.contactfront.ui.assets.OverpassApiClient.OsmData;
 import com.contactfront.ui.assets.SatelliteImageProcessor;
 import com.contactfront.ui.controller.GameController;
 import com.contactfront.ui.view.*;
@@ -63,7 +65,6 @@ public class App extends Application {
 
     private void handleLocationSelection(LocationSelector.LocationSelection loc) {
         try {
-            // Try to load satellite imagery and create terrain from it
             if (!GoogleMapsClient.getApiKey().isEmpty()) {
                 GoogleMapsClient.SatelliteImage satImg = GoogleMapsClient.downloadSatelliteImage(
                     loc.latitude(), loc.longitude(), 16, 512);
@@ -71,7 +72,15 @@ public class App extends Application {
                 SatelliteImageProcessor.SatelliteTerrainData terrainData = 
                     SatelliteImageProcessor.processSatelliteImage(satImg.data(), gameW, gameH);
                 
-                // Create GameState with satellite-derived terrain
+                // Calculate bbox for OSM fetch (~2km window at zoom 16)
+                double degPerTile = 360.0 / Math.pow(2, 16) * 512;
+                double minLat = loc.latitude() - degPerTile / 2;
+                double maxLat = loc.latitude() + degPerTile / 2;
+                double minLon = loc.longitude() - degPerTile / 2;
+                double maxLon = loc.longitude() + degPerTile / 2;
+                
+                OsmData osmData = OverpassApiClient.fetchBbox(minLat, minLon, maxLat, maxLon);
+                
                 ctrl = new GameController();
                 ctrl.onUpdate = this::refreshAll;
                 ctrl.setPlayerFaction(playerFaction);
@@ -85,8 +94,6 @@ public class App extends Application {
                 state.enemyFaction = enemyFaction;
                 state.elevation = terrainData.elevation();
                 state.moisture = terrainData.moisture();
-                
-                // Apply default doctrines
                 state.commandMode = CommandMode.DOCTRINE;
                 state.factionDoctrines.put(playerFaction, Doctrine.NATO);
                 state.factionDoctrines.put(enemyFaction, Doctrine.RUSSIAN);
@@ -101,20 +108,25 @@ public class App extends Application {
                 state.grid = grid;
                 state.ensureVisibility();
                 
-                // Place units manually since we're bypassing ScenarioGenerator
+                // Apply OSM data to semantic grid
+                com.contactfront.ui.assets.OsmSemanticGrid.apply(state, 
+                    osmData.roads(), osmData.buildings());
+                state.roadSegments.addAll(osmData.roads());
+                state.buildings.addAll(osmData.buildings());
+                
                 int id = 1;
                 int px = 2, py = gameH / 2;
-                Unit u1 = spawnUnit(state, "mbt", playerFaction, px, py, id++, ctrl.profiles);
+                Unit u1 = spawnUnit(state, "m1a2_abrams", playerFaction, px, py, id++, ctrl.profiles);
                 if (u1 != null) { u1.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u1); }
-                Unit u2 = spawnUnit(state, "ifv", playerFaction, px, py, id++, ctrl.profiles);
+                Unit u2 = spawnUnit(state, "bradley", playerFaction, px, py, id++, ctrl.profiles);
                 if (u2 != null) { u2.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u2); }
                 Unit u3 = spawnUnit(state, "inf_squad", playerFaction, px, py, id++, ctrl.profiles);
                 if (u3 != null) { u3.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u3); }
                 
                 int ex = gameW - 3, ey = gameH / 2;
-                Unit u4 = spawnUnit(state, "mbt", enemyFaction, ex, ey, id++, ctrl.profiles);
+                Unit u4 = spawnUnit(state, "t90m", enemyFaction, ex, ey, id++, ctrl.profiles);
                 if (u4 != null) { u4.applyDoctrine(Doctrine.RUSSIAN); state.enemyUnits.add(u4); }
-                Unit u5 = spawnUnit(state, "inf_squad", enemyFaction, ex, ey, id++, ctrl.profiles);
+                Unit u5 = spawnUnit(state, "motostrelki", enemyFaction, ex, ey, id++, ctrl.profiles);
                 if (u5 != null) { u5.applyDoctrine(Doctrine.RUSSIAN); state.enemyUnits.add(u5); }
                 
                 state.objectives.add(new com.contactfront.engine.model.Objective("OBJ1", "Secure Area", gameW/2, gameH/2, "capture"));
@@ -128,10 +140,9 @@ public class App extends Application {
                 return;
             }
         } catch (Exception e) {
-            System.err.println("Satellite terrain load failed, falling back to procedural: " + e.getMessage());
+            System.err.println("Location load failed, falling back to procedural: " + e.getMessage());
         }
         
-        // Fallback to procedural terrain
         startNewGame(playerFaction, enemyFaction);
     }
     
@@ -222,18 +233,24 @@ public class App extends Application {
     }
 
     private void startNewGameWithLocation(Faction playerFaction, Faction enemyFaction, Double lat, Double lon) {
-        // Generate random location if not provided
-        double latitude = lat != null ? lat : (Math.random() * 160 - 80); // -80 to 80 (valid lat range)
-        double longitude = lon != null ? lon : (Math.random() * 360 - 180); // -180 to 180 (valid lon range)
+        double latitude = lat != null ? lat : (Math.random() * 160 - 80);
+        double longitude = lon != null ? lon : (Math.random() * 360 - 180);
         
         try {
             if (!GoogleMapsClient.getApiKey().isEmpty()) {
-                // Use satellite terrain for RTS
                 int gameW = 28, gameH = 20;
                 GoogleMapsClient.SatelliteImage satImg = GoogleMapsClient.downloadSatelliteImage(
                     latitude, longitude, 16, 512);
                 SatelliteImageProcessor.SatelliteTerrainData terrainData = 
                     SatelliteImageProcessor.processSatelliteImage(satImg.data(), gameW, gameH);
+                
+                double degPerTile = 360.0 / Math.pow(2, 16) * 512;
+                double minLat = latitude - degPerTile / 2;
+                double maxLat = latitude + degPerTile / 2;
+                double minLon = longitude - degPerTile / 2;
+                double maxLon = longitude + degPerTile / 2;
+                
+                OsmData osmData = OverpassApiClient.fetchBbox(minLat, minLon, maxLat, maxLon);
                 
                 ctrl = new GameController();
                 ctrl.onUpdate = this::refreshAll;
@@ -262,20 +279,24 @@ public class App extends Application {
                 state.grid = grid;
                 state.ensureVisibility();
                 
-                // Place units
+                com.contactfront.ui.assets.OsmSemanticGrid.apply(state, 
+                    osmData.roads(), osmData.buildings());
+                state.roadSegments.addAll(osmData.roads());
+                state.buildings.addAll(osmData.buildings());
+                
                 int id = 1;
                 int px = 2, py = gameH / 2;
-                Unit u1 = spawnUnit(state, "mbt", playerFaction, px, py, id++, ctrl.profiles);
+                Unit u1 = spawnUnit(state, "m1a2_abrams", playerFaction, px, py, id++, ctrl.profiles);
                 if (u1 != null) { u1.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u1); }
-                Unit u2 = spawnUnit(state, "ifv", playerFaction, px, py, id++, ctrl.profiles);
+                Unit u2 = spawnUnit(state, "bradley", playerFaction, px, py, id++, ctrl.profiles);
                 if (u2 != null) { u2.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u2); }
                 Unit u3 = spawnUnit(state, "inf_squad", playerFaction, px, py, id++, ctrl.profiles);
                 if (u3 != null) { u3.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u3); }
                 
                 int ex = gameW - 3, ey = gameH / 2;
-                Unit u4 = spawnUnit(state, "mbt", enemyFaction, ex, ey, id++, ctrl.profiles);
+                Unit u4 = spawnUnit(state, "t90m", enemyFaction, ex, ey, id++, ctrl.profiles);
                 if (u4 != null) { u4.applyDoctrine(Doctrine.RUSSIAN); state.enemyUnits.add(u4); }
-                Unit u5 = spawnUnit(state, "inf_squad", enemyFaction, ex, ey, id++, ctrl.profiles);
+                Unit u5 = spawnUnit(state, "motostrelki", enemyFaction, ex, ey, id++, ctrl.profiles);
                 if (u5 != null) { u5.applyDoctrine(Doctrine.RUSSIAN); state.enemyUnits.add(u5); }
                 
                 state.objectives.add(new com.contactfront.engine.model.Objective("OBJ1", "Secure Area", gameW/2, gameH/2, "capture"));
@@ -292,7 +313,6 @@ public class App extends Application {
             System.err.println("Satellite terrain load failed: " + e.getMessage());
         }
         
-        // Fallback to procedural terrain
         ctrl = new GameController();
         ctrl.onUpdate = this::refreshAll;
         ctrl.setPlayerFaction(playerFaction);
@@ -392,8 +412,6 @@ public class App extends Application {
             case EQUALS, ADD, PLUS -> { mapView.setZoom(mapView.getZoom() * 1.1); e.consume(); }
             case MINUS, SUBTRACT -> { mapView.setZoom(mapView.getZoom() * 0.9); e.consume(); }
             case ESCAPE -> { ctrl.clearSelection(); e.consume(); }
-            case S -> { ctrl.beginSmoke(); e.consume(); }
-            case A -> { ctrl.beginArty(); e.consume(); }
         }
     }
 
@@ -428,9 +446,7 @@ public class App extends Application {
             ctrl.seed = loaded.seed();
             ctrl.engine = new TacticalEngine(loaded.state(), new Random(loaded.seed() ^ 0x5151));
             ctrl.selected = null;
-            ctrl.mode = com.contactfront.ui.controller.GameController.Mode.NONE;
-            ctrl.staged.clear();
-            ctrl.stagedUnits.clear();
+            ctrl.selection.clear();
             if (aarOverlay != null) { sceneRoot.getChildren().remove(aarOverlay); aarOverlay = null; }
             refreshAll();
         } catch (Exception ex) {
