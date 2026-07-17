@@ -457,7 +457,7 @@ public class App extends Application {
     private void handleScenarioCreated(ScenarioEditor.ScenarioEditorData data) {
         ctrl = new GameController();
         ctrl.onUpdate = this::refreshAll;
-        ctrl.state = data.state;
+        ctrl.state = data.state();
         ctrl.state.mode = "scenario_editor";
         ctrl.state.commandMode = data.commandMode();
         ctrl.state.playerFaction = data.playerFaction();

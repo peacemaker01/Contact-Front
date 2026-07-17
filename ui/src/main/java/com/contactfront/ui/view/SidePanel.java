@@ -1,5 +1,6 @@
 package com.contactfront.ui.view;
 
+import com.contactfront.engine.model.GameState;
 import com.contactfront.engine.model.Stance;
 import com.contactfront.engine.model.Unit;
 import com.contactfront.engine.model.Visibility;
