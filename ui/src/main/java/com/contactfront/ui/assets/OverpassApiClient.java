@@ -3,6 +3,7 @@ package com.contactfront.ui.assets;
 import com.contactfront.engine.model.Building;
 import com.contactfront.engine.model.RoadSegment;
 import com.contactfront.engine.model.RoadSegment.RoadType;
+import com.contactfront.ui.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -24,6 +25,7 @@ public final class OverpassApiClient {
     public static record OsmData(List<RoadSegment> roads, List<Building> buildings) {}
 
     public static OsmData fetchBbox(double minLat, double minLon, double maxLat, double maxLon) throws IOException, InterruptedException {
+        Log.info(String.format("Fetching OSM data for bbox: lat=%.4f-%.4f, lon=%.4f-%.4f", minLat, maxLat, minLon, maxLon));
         String query = String.format("""
             [out:json][timeout:25];
             (
@@ -41,10 +43,13 @@ public final class OverpassApiClient {
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
+            Log.error("Overpass API error: " + response.statusCode() + " " + response.body());
             throw new IOException("Overpass API error: " + response.statusCode());
         }
 
-        return parseOsm(response.body());
+        OsmData data = parseOsm(response.body());
+        Log.info(String.format("OSM fetch complete: %d roads, %d buildings", data.roads.size(), data.buildings.size()));
+        return data;
     }
 
     private static OsmData parseOsm(String json) {

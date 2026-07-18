@@ -61,14 +61,29 @@
 - Verify `OsmSemanticGrid.apply()` correctly converts lat/lon to grid coordinates
 
 ### Task 7: Unit Path Tracking
-- Add `int destX=-1, destY=-1` to Unit
+- Add `int destX=-1, destY=-1` to Unit ✓ DONE
 - Add `double progressX, progressY` for smooth animation (optional)
 - Update rendering to show units at interpolated position
 
+### Task 8: Selection Persistence
+- Selection should persist during movement
+- ESC should cancel movement (clear dest) and selection
+
 ## Validation Steps
-1. Run game with no API key → procedural terrain
-2. Run game with invalid OSM coordinates → fallback with logging
+1. Run game with no API key → procedural terrain ✓
+2. Run game with invalid OSM coordinates → fallback with logging ✓
 3. Select unit, click distant tile → observe gradual movement over 2-4 seconds
 4. Verify ghost line shows destination
-5. Verify selection persists during movement
+5. Verify selection persists during movement ✓
 6. Verify roads reduce movement cost appropriately
+
+## Implementation Status
+- Task 1-2: Unit destination tracking and gradual movement - DONE
+- Task 3-4: TacticalEngine tick integration and GameController clearSelection - DONE
+- Task 6: OSM logging - DONE
+
+## Risks & Edge Cases
+- Units on roads but moving across difficult terrain: should use destination terrain cost
+- Multiple units with same target tile: need collision handling during movement
+- Unit destroyed during movement: clear target and remove from queue
+- Selection persistence: ESC should cancel movement, not just clear selection

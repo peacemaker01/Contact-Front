@@ -34,6 +34,11 @@ public final class Unit {
     public boolean mobilityKill = false;
     public boolean firepowerKill = false;
 
+    // Gradual movement fields for RTS mode
+    public int destX = -1;
+    public int destY = -1;
+    public int stepsRemaining = 0;
+
     public boolean prefersDispersion = false;
     public boolean usesMassedAttacks = false;
     public double incomingSuppressionMult = 1.0;

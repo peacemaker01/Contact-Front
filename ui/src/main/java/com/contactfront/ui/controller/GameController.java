@@ -34,9 +34,25 @@ public class GameController {
     }
 
     public void clearSelection() {
+        cancelMovementForSelection();
         selection.clear();
         selected = null;
         refresh();
+    }
+
+    private void cancelMovementForSelection() {
+        for (Unit u : selection) {
+            u.destX = -1;
+            u.destY = -1;
+            u.stepsRemaining = 0;
+        }
+        // Remove MoveActions for these units from delayedOrders
+        state.delayedOrders.removeIf(o -> {
+            if (o.command instanceof MoveAction ma) {
+                return selection.stream().anyMatch(sel -> sel.id == ma.unitId());
+            }
+            return false;
+        });
     }
 
     public void newGame(long seed) {
@@ -60,7 +76,6 @@ public class GameController {
             selectAt(tx, ty);
             return;
         }
-        // In real-time mode, execute instantly (no staging)
         Unit enemy = state.enemyUnitAt(tx, ty);
         Unit friendly = state.friendlyUnitAt(tx, ty);
         if (enemy != null && enemy.knownToPlayer && !enemy.destroyed) {
@@ -79,6 +94,7 @@ public class GameController {
                     }
                 }
             }
+            selection.clear();
         } else if (friendly != null && friendly.hasSpecial("resupply_source") && !friendly.destroyed) {
             for (Unit u : selection) {
                 int dist = Math.abs(u.x - friendly.x) + Math.abs(u.y - friendly.y);
@@ -86,16 +102,20 @@ public class GameController {
                     engine.resolveAction(new ResupplyAction(u.id), false);
                 }
             }
+            selection.clear();
         } else {
             int idx = 0;
+            boolean moving = false;
             for (Unit u : selection) {
                 int[] dest = spreadTarget(u, tx, ty, idx++);
                 if (dest != null) {
-                    engine.resolveAction(new MoveAction(u.id, dest[0], dest[1]), false);
+                    if (engine.resolveAction(new MoveAction(u.id, dest[0], dest[1]), false)) {
+                        moving = true;
+                    }
                 }
             }
+            if (!moving) selection.clear();
         }
-        selection.clear();
         syncSelected();
         refresh();
     }
@@ -210,14 +230,18 @@ public class GameController {
             }
         } else {
             int idx = 0;
+            boolean moving = false;
             for (Unit u : selection) {
                 int[] dest = spreadTarget(u, tx, ty, idx++);
                 if (dest != null) {
-                    engine.resolveAction(new MoveAction(u.id, dest[0], dest[1]), false);
+                    var result = engine.issue(new MoveAction(u.id, dest[0], dest[1]));
+                    if (result.accepted) {
+                        moving = true;
+                    }
                 }
             }
+            if (!moving) selection.clear();
         }
-        selection.clear();
         syncSelected();
         refresh();
     }

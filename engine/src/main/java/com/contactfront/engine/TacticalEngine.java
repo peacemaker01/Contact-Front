@@ -33,6 +33,7 @@ public final class TacticalEngine {
         if (state.gameOver) return;
         state.elapsedMs += TICK_MS;
         state.turn = (int) (state.elapsedMs / 1000);
+        processMovement(state);
         runAiTick();
         processDelayedOrders(state, rng);
         Suppression.tick(state);
@@ -41,6 +42,15 @@ public final class TacticalEngine {
         Director.evaluate(state, state.turn);
         com.contactfront.engine.rules.Visibility.computePlayerVisibility(state);
         Objectives.check(state);
+    }
+
+    private void processMovement(GameState s) {
+        for (Unit u : s.friendlyUnits) {
+            if (Movement.isInMotion(u)) Movement.tickMove(s, u);
+        }
+        for (Unit u : s.enemyUnits) {
+            if (Movement.isInMotion(u)) Movement.tickMove(s, u);
+        }
     }
 
     public void runAiTick() {
@@ -80,13 +90,8 @@ public final class TacticalEngine {
         boolean executed = resolveAction(action, false);
         if (!executed) return ActionResult.reject("could not execute order");
 
-        if (!state.gameOver) {
-            processDelayedOrders(state, rng);
-            state.elapsedMs += TICK_MS;
-            resolveAction(action, false);
-            com.contactfront.engine.rules.Visibility.computePlayerVisibility(state);
-            Objectives.check(state);
-        }
+        com.contactfront.engine.rules.Visibility.computePlayerVisibility(state);
+        Objectives.check(state);
         return ActionResult.ok();
     }
 
@@ -123,6 +128,11 @@ public final class TacticalEngine {
                     }
                     s.log("orders", "Smoke deployed at (" + c.targetX() + "," + c.targetY() + ").");
                 } else {
+                    remaining.add(order);
+                }
+            } else if (order.command instanceof MoveAction ma) {
+                Unit u = state.friendlyById(ma.unitId());
+                if (u != null && !u.destroyed && (u.destX >= 0 && (u.destX != u.x || u.destY != u.y))) {
                     remaining.add(order);
                 }
             } else if (order.command instanceof Action a) {
@@ -182,7 +192,15 @@ public final class TacticalEngine {
         if (action instanceof MoveAction a) {
             Unit u = state.friendlyById(a.unitId());
             if (u == null || u.destroyed) return false;
-            return Movement.applyMove(state, u, a.targetX(), a.targetY());
+            if (Movement.startMove(state, u, a.targetX(), a.targetY())) {
+                u.movementPoints = 0;
+                // Add to delayedOrders for ghost visualization
+                if (!immediate) {
+                    state.delayedOrders.add(new DelayedOrder(a, (int) (state.elapsedMs / 1000) + 1, a.unitId()));
+                }
+                return true;
+            }
+            return false;
         }
         if (action instanceof AttackAction a) {
             Unit u = state.friendlyById(a.unitId());

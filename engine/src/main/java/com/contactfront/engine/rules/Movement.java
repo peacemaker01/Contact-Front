@@ -5,6 +5,7 @@ import com.contactfront.engine.model.Tile;
 import com.contactfront.engine.model.Unit;
 import com.contactfront.engine.model.UnitCategory;
 import com.contactfront.engine.model.Terrain;
+import com.contactfront.engine.model.MoveAction;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -48,6 +49,58 @@ public final class Movement {
         return true;
     }
 
+    public static boolean startMove(GameState s, Unit u, int tx, int ty) {
+        if (tx < 0 || ty < 0 || tx >= s.width() || ty >= s.height()) return false;
+        if (tx == u.x && ty == u.y) return false;
+        double budget = u.effectiveMovementPoints() * u.stance.moveMult;
+        double cost = pathCost(s.grid, u.x, u.y, tx, ty, u.profile.category());
+        if (cost == Double.POSITIVE_INFINITY || cost > budget) return false;
+
+        u.destX = tx;
+        u.destY = ty;
+        u.stepsRemaining = Math.max(1, (int) Math.ceil(cost));
+        return true;
+    }
+
+    public static void tickMove(GameState s, Unit u) {
+        if (u.destX < 0 || u.destroyed) return;
+
+        int dx = Integer.compare(u.destX, u.x);
+        int dy = Integer.compare(u.destY, u.y);
+        if (dx == 0 && dy == 0) {
+            u.destX = -1;
+            u.destY = -1;
+            u.stepsRemaining = 0;
+            return;
+        }
+
+        int nx = u.x + dx;
+        int ny = u.y + dy;
+
+        if (nx < 0 || ny < 0 || nx >= s.width() || ny >= s.height()) {
+            u.destX = -1;
+            u.destY = -1;
+            u.stepsRemaining = 0;
+            return;
+        }
+        if (occupied(s, nx, ny, u)) {
+            u.destX = -1;
+            u.destY = -1;
+            u.stepsRemaining = 0;
+            return;
+        }
+
+        u.x = nx;
+        u.y = ny;
+        u.stepsRemaining--;
+
+        if (u.stepsRemaining <= 0 || (u.x == u.destX && u.y == u.destY)) {
+            u.destX = -1;
+            u.destY = -1;
+            u.stepsRemaining = 0;
+        }
+    }
+
     private static boolean occupied(GameState s, int x, int y, Unit self) {
         for (Unit u : s.friendlyUnits) if (u != self && !u.destroyed && u.x == x && u.y == y) return true;
         for (Unit u : s.enemyUnits) if (u != self && !u.destroyed && u.x == x && u.y == y) return true;
@@ -67,5 +120,9 @@ public final class Movement {
             }
         }
         return out;
+    }
+
+    public static boolean isInMotion(Unit u) {
+        return u.destX >= 0 && !u.destroyed;
     }
 }
