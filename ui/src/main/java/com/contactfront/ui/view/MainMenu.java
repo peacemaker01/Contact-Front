@@ -86,7 +86,6 @@ public class MainMenu {
 
     private void showLocationSelect() {
         LocationSelector selector = new LocationSelector(stage, loc -> {
-            stage.setScene(new Scene(new VBox(10), 800, 600));
             onLocationSelect.accept(loc);
         });
         selector.show();

@@ -5,6 +5,7 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
+import javafx.stage.Modality;
 import javafx.stage.Stage;
 
 import java.util.function.Consumer;
@@ -16,8 +17,10 @@ public class OptionsDialog {
     public record OptionsData(String googleMapsApiKey, String openStreetMapUrl, int offlineCacheSizeMb, 
                                boolean enableRealtimeMovement, double gameSpeed) {}
 
-    public OptionsDialog(Stage stage, Consumer<OptionsData> onSave) {
-        this.stage = stage;
+    public OptionsDialog(Stage owner, Consumer<OptionsData> onSave) {
+        this.stage = new Stage();
+        this.stage.initOwner(owner);
+        this.stage.initModality(Modality.WINDOW_MODAL);
         this.onSave = onSave;
     }
 
@@ -54,6 +57,7 @@ public class OptionsDialog {
         Button cancelBtn = new Button("Cancel");
 
         saveBtn.setOnAction(e -> {
+            Log.info("Options save clicked");
             OptionsData data = new OptionsData(
                 googleMapsKeyField.getText().trim(),
                 osmUrlField.getText().trim(),
@@ -62,6 +66,7 @@ public class OptionsDialog {
                 speedSpinner.getValue()
             );
             onSave.accept(data);
+            Log.info("Options save callback completed, closing dialog");
             stage.close();
         });
 

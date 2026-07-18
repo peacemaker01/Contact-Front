@@ -5,6 +5,11 @@
 - Test: `mvn test`
 - Package: `mvn package` (in ui module)
 
+## Debugging
+- Log file: `logs/contactfront.log` - application-wide logging
+- Use `Log.info()`/`Log.error()` for diagnostics
+- Console output visible when running from terminal
+
 ## Architecture Notes
 
 ### Execution Model (RTS)

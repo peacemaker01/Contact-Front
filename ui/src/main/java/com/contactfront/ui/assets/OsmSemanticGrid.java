@@ -62,18 +62,21 @@ public final class OsmSemanticGrid {
         return Math.max(0, Math.min(s.height() - 1, gy));
     }
 
-    private static void drawLine(GameState s, double x0, double y0, double x1, double y1, Terrain type) {
-        double dx = Math.abs(x1 - x0);
-        double dy = Math.abs(y1 - y0);
-        double sx = x0 < x1 ? 1 : -1;
-        double sy = y0 < y1 ? 1 : -1;
-        double err = dx - dy;
-        double x = x0, y = y0;
+    private static void drawLine(GameState s, double lon0, double lat0, double lon1, double lat1, Terrain type) {
+        int x0 = lonToGrid(s, lon0);
+        int y0 = latToGrid(s, lat0);
+        int x1 = lonToGrid(s, lon1);
+        int y1 = latToGrid(s, lat1);
+        
+        int dx = Math.abs(x1 - x0);
+        int dy = Math.abs(y1 - y0);
+        int sx = x0 < x1 ? 1 : -1;
+        int sy = y0 < y1 ? 1 : -1;
+        int err = dx - dy;
+        int x = x0, y = y0;
         while (true) {
-            int gx = lonToGrid(s, x);
-            int gy = latToGrid(s, y);
-            if (gx >= 0 && gx < s.width() && gy >= 0 && gy < s.height()) {
-                Tile t = s.grid[gy][gx];
+            if (x >= 0 && x < s.width() && y >= 0 && y < s.height()) {
+                Tile t = s.grid[y][x];
                 if (t != null && t.type != Terrain.BUILDING) {
                     t.type = type;
                     t.movementCost = 0.5;
@@ -82,7 +85,7 @@ public final class OsmSemanticGrid {
                 }
             }
             if (x == x1 && y == y1) break;
-            double e2 = 2 * err;
+            int e2 = 2 * err;
             if (e2 > -dy) { err -= dy; x += sx; }
             if (e2 < dx) { err += dx; y += sy; }
         }

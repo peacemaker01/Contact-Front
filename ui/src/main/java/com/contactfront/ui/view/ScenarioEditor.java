@@ -8,6 +8,7 @@ import com.contactfront.engine.model.Tile;
 import com.contactfront.engine.model.Unit;
 import com.contactfront.engine.model.UnitProfile;
 import com.contactfront.engine.data.Profiles;
+import com.contactfront.ui.Log;
 import com.contactfront.ui.controller.GameController;
 
 import javafx.geometry.Insets;
@@ -15,11 +16,13 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
+import javafx.stage.Modality;
 import javafx.stage.Stage;
 
 import java.util.function.Consumer;
 
 public class ScenarioEditor {
+    private final Stage owner;
     private final Stage stage;
     private final Consumer<ScenarioEditorData> onScenarioCreated;
     
@@ -40,8 +43,11 @@ public class ScenarioEditor {
     private boolean editMode = true;
     private MapView mapView;
     
-    public ScenarioEditor(Stage stage, GameController ctrl, Consumer<ScenarioEditorData> onScenarioCreated) {
-        this.stage = stage;
+    public ScenarioEditor(Stage owner, GameController ctrl, Consumer<ScenarioEditorData> onScenarioCreated) {
+        this.owner = owner;
+        this.stage = new Stage();
+        this.stage.initOwner(owner);
+        this.stage.initModality(Modality.WINDOW_MODAL);
         this.ctrl = ctrl;
         this.onScenarioCreated = onScenarioCreated;
     }
@@ -51,7 +57,7 @@ public class ScenarioEditor {
         Scene scene = new Scene(root, 1200, 800);
         stage.setScene(scene);
         stage.setTitle("Contact Front — Scenario Editor");
-        stage.centerOnScreen();
+        Log.info("Scenario editor shown");
         stage.show();
     }
 
@@ -95,6 +101,7 @@ public class ScenarioEditor {
         // Initialize controller if needed
         if (ctrl == null) {
             ctrl = new GameController();
+            ctrl.profiles = Profiles.load();
         }
         ctrl.newGame(System.nanoTime());
         mapView = new MapView(ctrl, 30, (x, y) -> placeUnit(x, y));
@@ -134,6 +141,7 @@ public class ScenarioEditor {
     }
     
     private void finishEditing() {
+        Log.info("Scenario editor finished - friendly units: " + ctrl.state.friendlyUnits.size() + ", enemy units: " + ctrl.state.enemyUnits.size());
         ScenarioEditorData data = new ScenarioEditorData(
             "Custom Scenario",
             "Created in editor",

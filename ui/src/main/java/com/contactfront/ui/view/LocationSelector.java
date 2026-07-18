@@ -1,22 +1,28 @@
 package com.contactfront.ui.view;
 
+import com.contactfront.ui.Log;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
+import javafx.stage.Modality;
 import javafx.stage.Stage;
 
 import java.util.function.Consumer;
 
 public class LocationSelector {
+    private final Stage owner;
     private final Stage stage;
     private final Consumer<LocationSelection> onLocationSelected;
 
     public record LocationSelection(double latitude, double longitude, String locationName) {}
 
-    public LocationSelector(Stage stage, Consumer<LocationSelection> onLocationSelected) {
-        this.stage = stage;
+    public LocationSelector(Stage owner, Consumer<LocationSelection> onLocationSelected) {
+        this.owner = owner;
+        this.stage = new Stage();
+        this.stage.initOwner(owner);
+        this.stage.initModality(Modality.WINDOW_MODAL);
         this.onLocationSelected = onLocationSelected;
     }
 
@@ -26,6 +32,7 @@ public class LocationSelector {
         stage.setScene(scene);
         stage.setTitle("Select Location -- Contact Front");
         stage.centerOnScreen();
+        Log.info("Location selector shown");
         stage.show();
     }
 

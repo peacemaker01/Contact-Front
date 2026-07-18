@@ -51,6 +51,8 @@ public class MapView {
         this.scroll = new javafx.scene.control.ScrollPane(stack);
         this.scroll.setStyle("-fx-background-color:#0e1117;");
         this.scroll.setPannable(false);
+        this.scroll.setFitToWidth(true);
+        this.scroll.setFitToHeight(true);
         wireMouse();
     }
 

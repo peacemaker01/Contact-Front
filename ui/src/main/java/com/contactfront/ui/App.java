@@ -54,8 +54,9 @@ public class App extends Application {
     }
 
     private void showMainMenu() {
+        Log.info("Showing main menu");
         MainMenu menu = new MainMenu(primaryStage, 
-            () -> startNewGame(playerFaction, enemyFaction),
+            () -> { Log.info("New Game clicked"); startNewGame(playerFaction, enemyFaction); },
             this::doLoad,
             this::showOptions,
             this::showScenarioBuilder,
@@ -64,28 +65,29 @@ public class App extends Application {
     }
 
     private void handleLocationSelection(LocationSelector.LocationSelection loc) {
-        try {
-            if (!GoogleMapsClient.getApiKey().isEmpty()) {
+        if (!GoogleMapsClient.getApiKey().isEmpty()) {
+            try {
                 GoogleMapsClient.SatelliteImage satImg = GoogleMapsClient.downloadSatelliteImage(
                     loc.latitude(), loc.longitude(), 16, 512);
                 int gameW = 28, gameH = 20;
-                SatelliteImageProcessor.SatelliteTerrainData terrainData = 
+                SatelliteImageProcessor.SatelliteTerrainData terrainData =
                     SatelliteImageProcessor.processSatelliteImage(satImg.data(), gameW, gameH);
-                
+
                 // Calculate bbox for OSM fetch (~2km window at zoom 16)
                 double degPerTile = 360.0 / Math.pow(2, 16) * 512;
                 double minLat = loc.latitude() - degPerTile / 2;
                 double maxLat = loc.latitude() + degPerTile / 2;
                 double minLon = loc.longitude() - degPerTile / 2;
                 double maxLon = loc.longitude() + degPerTile / 2;
-                
+
                 OsmData osmData = OverpassApiClient.fetchBbox(minLat, minLon, maxLat, maxLon);
-                
+
                 ctrl = new GameController();
+                ctrl.profiles = Profiles.load();
                 ctrl.onUpdate = this::refreshAll;
                 ctrl.setPlayerFaction(playerFaction);
                 ctrl.enemyFaction = enemyFaction;
-                
+
                 GameState state = new GameState();
                 state.latitude = loc.latitude();
                 state.longitude = loc.longitude();
@@ -97,7 +99,7 @@ public class App extends Application {
                 state.commandMode = CommandMode.DOCTRINE;
                 state.factionDoctrines.put(playerFaction, Doctrine.NATO);
                 state.factionDoctrines.put(enemyFaction, Doctrine.RUSSIAN);
-                
+
                 Tile[][] grid = new Tile[gameH][gameW];
                 Terrain[][] classedTerrain = terrainData.terrain();
                 for (int y = 0; y < gameH; y++) {
@@ -107,13 +109,13 @@ public class App extends Application {
                 }
                 state.grid = grid;
                 state.ensureVisibility();
-                
+
                 // Apply OSM data to semantic grid
-                com.contactfront.ui.assets.OsmSemanticGrid.apply(state, 
+                com.contactfront.ui.assets.OsmSemanticGrid.apply(state,
                     osmData.roads(), osmData.buildings());
                 state.roadSegments.addAll(osmData.roads());
                 state.buildings.addAll(osmData.buildings());
-                
+
                 int id = 1;
                 int px = 2, py = gameH / 2;
                 Unit u1 = spawnUnit(state, "m1a2_abrams", playerFaction, px, py, id++, ctrl.profiles);
@@ -122,31 +124,32 @@ public class App extends Application {
                 if (u2 != null) { u2.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u2); }
                 Unit u3 = spawnUnit(state, "inf_squad", playerFaction, px, py, id++, ctrl.profiles);
                 if (u3 != null) { u3.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u3); }
-                
+
                 int ex = gameW - 3, ey = gameH / 2;
                 Unit u4 = spawnUnit(state, "t90m", enemyFaction, ex, ey, id++, ctrl.profiles);
                 if (u4 != null) { u4.applyDoctrine(Doctrine.RUSSIAN); state.enemyUnits.add(u4); }
                 Unit u5 = spawnUnit(state, "motostrelki", enemyFaction, ex, ey, id++, ctrl.profiles);
                 if (u5 != null) { u5.applyDoctrine(Doctrine.RUSSIAN); state.enemyUnits.add(u5); }
-                
+
                 state.objectives.add(new com.contactfront.engine.model.Objective("OBJ1", "Secure Area", gameW/2, gameH/2, "capture"));
-                
+
                 ctrl.state = state;
                 ctrl.seed = System.currentTimeMillis();
                 ctrl.engine = new TacticalEngine(ctrl.state, new Random(ctrl.seed ^ 0x5151));
                 ctrl.engine.start();
-                
+
                 showGame();
                 return;
+            } catch (Exception e) {
+                System.err.println("Location load failed, falling back to procedural: " + e.getMessage());
             }
-        } catch (Exception e) {
-            System.err.println("Location load failed, falling back to procedural: " + e.getMessage());
         }
-        
+
         startNewGame(playerFaction, enemyFaction);
     }
     
     private void showGame() {
+        Log.info("Showing game - state: " + (ctrl.state != null ? "ready w=" + ctrl.state.width() : "null"));
         mapView = new MapView(ctrl, 30);
         sidePanel = new SidePanel(ctrl);
         topStatus = new TopStatus();
@@ -173,10 +176,10 @@ public class App extends Application {
         primaryStage.setTitle("Contact Front — Real-Time Tactical Mode");
         primaryStage.setMinWidth(1000);
         primaryStage.setMinHeight(600);
-        primaryStage.centerOnScreen();
-        
         primaryStage.show();
 
+        // Ensure map is drawn after scene is shown
+        mapView.redraw();
         scene.setOnKeyPressed(e -> handleKey(e));
         startGameLoop();
         refreshAll();
@@ -235,28 +238,29 @@ public class App extends Application {
     private void startNewGameWithLocation(Faction playerFaction, Faction enemyFaction, Double lat, Double lon) {
         double latitude = lat != null ? lat : (Math.random() * 160 - 80);
         double longitude = lon != null ? lon : (Math.random() * 360 - 180);
-        
-        try {
-            if (!GoogleMapsClient.getApiKey().isEmpty()) {
+
+        if (!GoogleMapsClient.getApiKey().isEmpty()) {
+            try {
                 int gameW = 28, gameH = 20;
                 GoogleMapsClient.SatelliteImage satImg = GoogleMapsClient.downloadSatelliteImage(
                     latitude, longitude, 16, 512);
-                SatelliteImageProcessor.SatelliteTerrainData terrainData = 
+                SatelliteImageProcessor.SatelliteTerrainData terrainData =
                     SatelliteImageProcessor.processSatelliteImage(satImg.data(), gameW, gameH);
-                
+
                 double degPerTile = 360.0 / Math.pow(2, 16) * 512;
                 double minLat = latitude - degPerTile / 2;
                 double maxLat = latitude + degPerTile / 2;
                 double minLon = longitude - degPerTile / 2;
                 double maxLon = longitude + degPerTile / 2;
-                
+
                 OsmData osmData = OverpassApiClient.fetchBbox(minLat, minLon, maxLat, maxLon);
-                
+
                 ctrl = new GameController();
+                ctrl.profiles = Profiles.load();
                 ctrl.onUpdate = this::refreshAll;
                 ctrl.setPlayerFaction(playerFaction);
                 ctrl.enemyFaction = enemyFaction;
-                
+
                 GameState state = new GameState();
                 state.latitude = latitude;
                 state.longitude = longitude;
@@ -268,7 +272,7 @@ public class App extends Application {
                 state.commandMode = CommandMode.DOCTRINE;
                 state.factionDoctrines.put(playerFaction, Doctrine.NATO);
                 state.factionDoctrines.put(enemyFaction, Doctrine.RUSSIAN);
-                
+
                 Tile[][] grid = new Tile[gameH][gameW];
                 Terrain[][] classedTerrain = terrainData.terrain();
                 for (int y = 0; y < gameH; y++) {
@@ -278,12 +282,12 @@ public class App extends Application {
                 }
                 state.grid = grid;
                 state.ensureVisibility();
-                
-                com.contactfront.ui.assets.OsmSemanticGrid.apply(state, 
+
+                com.contactfront.ui.assets.OsmSemanticGrid.apply(state,
                     osmData.roads(), osmData.buildings());
                 state.roadSegments.addAll(osmData.roads());
                 state.buildings.addAll(osmData.buildings());
-                
+
                 int id = 1;
                 int px = 2, py = gameH / 2;
                 Unit u1 = spawnUnit(state, "m1a2_abrams", playerFaction, px, py, id++, ctrl.profiles);
@@ -292,32 +296,33 @@ public class App extends Application {
                 if (u2 != null) { u2.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u2); }
                 Unit u3 = spawnUnit(state, "inf_squad", playerFaction, px, py, id++, ctrl.profiles);
                 if (u3 != null) { u3.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u3); }
-                
+
                 int ex = gameW - 3, ey = gameH / 2;
                 Unit u4 = spawnUnit(state, "t90m", enemyFaction, ex, ey, id++, ctrl.profiles);
                 if (u4 != null) { u4.applyDoctrine(Doctrine.RUSSIAN); state.enemyUnits.add(u4); }
                 Unit u5 = spawnUnit(state, "motostrelki", enemyFaction, ex, ey, id++, ctrl.profiles);
                 if (u5 != null) { u5.applyDoctrine(Doctrine.RUSSIAN); state.enemyUnits.add(u5); }
-                
+
                 state.objectives.add(new com.contactfront.engine.model.Objective("OBJ1", "Secure Area", gameW/2, gameH/2, "capture"));
-                
+
                 ctrl.state = state;
                 ctrl.seed = System.currentTimeMillis();
                 ctrl.engine = new TacticalEngine(ctrl.state, new Random(ctrl.seed ^ 0x5151));
                 ctrl.engine.start();
-                
+
                 showGame();
                 return;
+            } catch (Exception e) {
+                System.err.println("Satellite terrain load failed: " + e.getMessage());
             }
-        } catch (Exception e) {
-            System.err.println("Satellite terrain load failed: " + e.getMessage());
         }
-        
+
         ctrl = new GameController();
+        ctrl.profiles = Profiles.load();
         ctrl.onUpdate = this::refreshAll;
         ctrl.setPlayerFaction(playerFaction);
         ctrl.enemyFaction = enemyFaction;
-        
+
         ctrl.newGame(System.nanoTime());
         showGame();
     }
@@ -455,9 +460,11 @@ public class App extends Application {
     }
 
     private void showOptions() {
+        Log.info("Opening options dialog");
         OptionsDialog dialog = new OptionsDialog(primaryStage, data -> {
             GoogleMapsClient.setApiKey(data.googleMapsApiKey());
             GoogleMapsClient.setCacheDir(Path.of("cache/maps"));
+            Log.info("Options saved - API key: " + (data.googleMapsApiKey().isEmpty() ? "none" : "***"));
         });
         dialog.show();
     }
@@ -472,6 +479,7 @@ public class App extends Application {
 
     private void handleScenarioCreated(ScenarioEditor.ScenarioEditorData data) {
         ctrl = new GameController();
+        ctrl.profiles = Profiles.load();
         ctrl.onUpdate = this::refreshAll;
         ctrl.state = data.state();
         ctrl.state.mode = "scenario_editor";
@@ -512,10 +520,9 @@ public class App extends Application {
         primaryStage.setTitle("Contact Front — Scenario Game");
         primaryStage.setMinWidth(1000);
         primaryStage.setMinHeight(600);
-        primaryStage.centerOnScreen();
-
         primaryStage.show();
 
+        mapView.redraw();
         scene.setOnKeyPressed(e -> handleKey(e));
         startGameLoop();
         refreshAll();
