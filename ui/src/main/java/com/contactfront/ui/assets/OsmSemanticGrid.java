@@ -9,6 +9,9 @@ import com.contactfront.engine.model.Tile;
 import java.util.List;
 
 public final class OsmSemanticGrid {
+    private static final double EARTH_RADIUS = 6378137.0;
+    private static final double MERCATOR_MAX = 20037508.34;
+    
     private OsmSemanticGrid() {}
 
     public static void apply(GameState s, List<RoadSegment> roads, List<Building> buildings) {
@@ -49,17 +52,30 @@ public final class OsmSemanticGrid {
             }
         }
     }
-
+    
     private static int lonToGrid(GameState s, double lon) {
-        double lonPerTile = 360.0 / s.width();
-        int gx = (int) Math.round((lon - s.longitude + 180) / lonPerTile);
+        double mercX = lonToWebMercatorX(lon);
+        double centerMercX = lonToWebMercatorX(s.longitude);
+        double mercPerTile = 2.0 * MERCATOR_MAX / (double) s.width();
+        int gx = (int) Math.round((mercX - centerMercX) / mercPerTile + s.width() / 2.0);
         return Math.max(0, Math.min(s.width() - 1, gx));
     }
 
     private static int latToGrid(GameState s, double lat) {
-        double latPerTile = 180.0 / s.height();
-        int gy = (int) Math.round((s.latitude - lat + 90) / latPerTile);
+        double mercY = latToWebMercatorY(lat);
+        double centerMercY = latToWebMercatorY(s.latitude);
+        double mercPerTile = 2.0 * MERCATOR_MAX / (double) s.height();
+        int gy = (int) Math.round((centerMercY - mercY) / mercPerTile + s.height() / 2.0);
         return Math.max(0, Math.min(s.height() - 1, gy));
+    }
+    
+    private static double lonToWebMercatorX(double lon) {
+        return EARTH_RADIUS * Math.toRadians(lon);
+    }
+    
+    private static double latToWebMercatorY(double lat) {
+        double latRad = Math.toRadians(lat);
+        return EARTH_RADIUS * Math.log(Math.tan(Math.PI / 4 + latRad / 2));
     }
 
     private static void drawLine(GameState s, double lon0, double lat0, double lon1, double lat1, Terrain type) {

@@ -23,6 +23,7 @@ public class GameState {
     public Visibility[][] visibility;
     public final List<Unit> friendlyUnits = new ArrayList<>();
     public final List<Unit> enemyUnits = new ArrayList<>();
+    public final List<Unit> placedUnits = new ArrayList<>();
 
     public int artilleryFiresRemaining = 3;
     public int casAvailable = 2;

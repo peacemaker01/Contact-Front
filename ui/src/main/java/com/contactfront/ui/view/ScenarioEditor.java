@@ -42,7 +42,7 @@ public class ScenarioEditor {
     private String placingUnitType = "inf_squad";
     private boolean editMode = true;
     private MapView mapView;
-    
+
     public ScenarioEditor(Stage owner, GameController ctrl, Consumer<ScenarioEditorData> onScenarioCreated) {
         this.owner = owner;
         this.stage = new Stage();
@@ -56,13 +56,12 @@ public class ScenarioEditor {
         BorderPane root = buildEditor();
         Scene scene = new Scene(root, 1200, 800);
         stage.setScene(scene);
-        stage.setTitle("Contact Front — Scenario Editor");
+        stage.setTitle("Scenario Editor");
         Log.info("Scenario editor shown");
         stage.show();
     }
 
     private BorderPane buildEditor() {
-        // Toolbar with unit types
         VBox toolbar = new VBox(5);
         toolbar.setPadding(new Insets(10));
         toolbar.setAlignment(Pos.TOP_CENTER);
@@ -71,15 +70,19 @@ public class ScenarioEditor {
         Label title = new Label("Editor");
         title.setStyle("-fx-text-fill:#4fc3f7; -fx-font-size:16px;");
         
-        ToggleButton playerToggle = new ToggleButton("Player");
+        ToggleButton playerToggle = new ToggleButton("Side A");
         playerToggle.setSelected(true);
         playerToggle.setOnAction(e -> placingFaction = Faction.USA);
-        ToggleButton enemyToggle = new ToggleButton("Enemy");
+        ToggleButton enemyToggle = new ToggleButton("Side B");
         enemyToggle.setOnAction(e -> placingFaction = Faction.RUSSIA);
         
-        String[] unitTypes = {"inf_squad", "mbt", "ifv", "aa_team", "engineer_squad"};
-        
         VBox unitsBox = new VBox(3);
+        if (ctrl.profiles == null) {
+            ctrl.profiles = Profiles.load();
+        }
+        String[] unitTypes = ctrl.profiles.allUnits().stream()
+            .map(p -> p.id())
+            .toArray(String[]::new);
         for (String type : unitTypes) {
             ToggleButton btn = new ToggleButton(type.replace("_", " "));
             btn.setUserData(type);
@@ -96,9 +99,8 @@ public class ScenarioEditor {
         doneBtn.setOnAction(e -> finishEditing());
         
         toolbar.getChildren().addAll(title, new Label("Faction:"), playerToggle, enemyToggle, 
-                                   new Label("Units:"), unitsBox, doneBtn);
+                                    new Label("Units:"), unitsBox, doneBtn);
         
-        // Initialize controller if needed
         if (ctrl == null) {
             ctrl = new GameController();
             ctrl.profiles = Profiles.load();
@@ -122,31 +124,27 @@ public class ScenarioEditor {
         Tile tile = ctrl.state.grid[ty][tx];
         if (tile.impassable()) return;
         
-        // Check if unit already there
         if (ctrl.state.friendlyUnitAt(tx, ty) != null || ctrl.state.enemyUnitAt(tx, ty) != null) return;
         
         UnitProfile profile = ctrl.profiles.unit(placingUnitType);
         if (profile == null) return;
         
-        int id = ctrl.state.friendlyUnits.size() + ctrl.state.enemyUnits.size() + 1;
+        int id = ctrl.state.placedUnits.size() + 1;
         Unit unit = new Unit(id, placingFaction, profile, tx, ty, ctrl.profiles);
         
-        if (placingFaction == ctrl.state.playerFaction) {
-            ctrl.state.friendlyUnits.add(unit);
-        } else {
-            ctrl.state.enemyUnits.add(unit);
-        }
+        ctrl.state.placedUnits.add(unit);
         
         mapView.redraw();
     }
     
     private void finishEditing() {
-        Log.info("Scenario editor finished - friendly units: " + ctrl.state.friendlyUnits.size() + ", enemy units: " + ctrl.state.enemyUnits.size());
+        Log.info("Scenario editor finished - units placed: " + ctrl.state.placedUnits.size());
+        
         ScenarioEditorData data = new ScenarioEditorData(
             "Custom Scenario",
             "Created in editor",
-            ctrl.state.playerFaction,
-            ctrl.state.enemyFaction,
+            placingFaction,
+            null,
             CommandMode.DOCTRINE,
             Doctrine.NATO,
             Doctrine.RUSSIAN,

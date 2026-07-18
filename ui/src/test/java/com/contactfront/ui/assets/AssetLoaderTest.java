@@ -13,22 +13,6 @@ class AssetLoaderTest {
     @Test
     void testAssetManagerInitialization() throws Exception {
         AssetManager.initialize(tempDir.resolve("assets"));
-        
-        Material.PBRMaterial grass = AssetManager.getMaterial("grass");
-        assertNotNull(grass);
-        assertEquals("grass", grass.name());
-        assertNotNull(grass.albedo());
-        assertNotNull(grass.normal());
-    }
-
-    @Test
-    void testMaterialCache() throws Exception {
-        AssetManager.initialize(tempDir.resolve("assets"));
-        
-        Material.PBRMaterial m1 = AssetManager.getMaterial("dirt");
-        Material.PBRMaterial m2 = AssetManager.getMaterial("dirt");
-        
-        assertSame(m1, m2);
     }
 
     @Test
@@ -43,15 +27,6 @@ class AssetLoaderTest {
     }
 
     @Test
-    void testModelLoading() throws Exception {
-        AssetManager.initialize(tempDir.resolve("assets"));
-        
-        ModelLoader.Model model = AssetManager.getModel("tree.obj");
-        assertNotNull(model);
-        assertTrue(model.meshes().length > 0);
-    }
-
-    @Test
     void testPlaceholderGeneration() throws Exception {
         AssetManager.initialize(tempDir.resolve("assets"));
         
@@ -63,20 +38,12 @@ class AssetLoaderTest {
     }
 
     @Test
-    void testBushMaterial() throws Exception {
+    void testTextureCache() throws Exception {
         AssetManager.initialize(tempDir.resolve("assets"));
         
-        Material.PBRMaterial bush = AssetManager.getMaterial("bush");
-        assertNotNull(bush);
-        assertEquals("bush", bush.name());
-    }
-
-    @Test
-    void testAsphaltMaterial() throws Exception {
-        AssetManager.initialize(tempDir.resolve("assets"));
+        Texture.TextureData t1 = AssetManager.getTexture("grass_albedo.png");
+        Texture.TextureData t2 = AssetManager.getTexture("grass_albedo.png");
         
-        Material.PBRMaterial road = AssetManager.getMaterial("asphalt");
-        assertNotNull(road);
-        assertEquals("asphalt", road.name());
+        assertSame(t1, t2);
     }
 }

@@ -123,7 +123,8 @@ public final class Movement {
 
     public static List<int[]> reachable(GameState s, Unit u) {
         List<int[]> out = new ArrayList<>();
-        int maxTiles = (int) (tilesPerSecond(u) * 60);
+        int maxTicks = (int) (ticksPerTile(u) * 120);
+        int maxTiles = maxTicks;
         for (int y = 0; y < s.height(); y++) {
             for (int x = 0; x < s.width(); x++) {
                 if (x == u.x && y == u.y) continue;
@@ -134,6 +135,17 @@ public final class Movement {
             }
         }
         return out;
+    }
+
+    private static double tsPerTile(Unit u) {
+        return switch (u.profile.category()) {
+            case ARMOR, LOGISTICS -> 2.0;
+            case RECON -> 1.5;
+            case INFANTRY -> 6.0;
+            case ENGINEER -> 7.0;
+            case AIR_DEFENSE, ARTILLERY -> 8.0;
+            default -> 6.0;
+        };
     }
 
     public static boolean isInMotion(Unit u) {

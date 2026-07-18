@@ -39,7 +39,6 @@ public final class TacticalEngine {
         Suppression.tick(state);
         state.tickSmoke();
         checkResupply();
-        Director.evaluate(state, state.turn);
         com.contactfront.engine.rules.Visibility.computePlayerVisibility(state);
         Objectives.check(state);
     }

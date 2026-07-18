@@ -499,11 +499,48 @@ regeneration), and gameplay (movement cost, cover, LOS) is identical
 regardless of which view is active, since both read the same
 `OsmSemanticGrid` data underneath.
 
+## Milestone 14 — Scenario builder
+
+Eden-inspired: a location search/pick, a faction-organized unit palette
+(reads directly from `unit_profiles.json` — not a separate content system),
+drag-and-drop placement on the flat 2D map (Milestone 13 replacement),
+an inspector panel for the selected unit (facing at minimum; waypoints are
+a later refinement, not required for v1), and an objectives panel.
+
+**Decisions locked in:**
+- **Side assignment is flexible, not baked in.** The creator places two
+  forces on the map without designating either as "the player's side."
+  At launch, the player picks which force to play; `AiTurn`/`Director`
+  take whichever force is left. This means a single saved mission file is
+  replayable from either side without the creator doing anything extra —
+  confirm `ScenarioSerializer` doesn't currently assume a fixed player
+  side, and correct it if it does.
+- **Objective types for v1: capture zone, destroy target, hold position.**
+  All three are state checks the engine can evaluate each tick (is a zone
+  occupied by force X, is a target unit dead, is a position held for N
+  ticks) — no scripted-event system needed. Escort/protect and timed
+  objectives are explicitly deferred, not designed against yet.
+- **Instant test-play, Eden-style.** The builder's "test play" button
+  launches the mission directly in the same real-time engine, no export/
+  reimport step — this should be straightforward given the app is already
+  one native process with no separate runtime to bridge into.
+
+**Existing scaffolding to build on, not replace**: `ScenarioEditor`,
+`MapEditor`, `ScenarioBuilder`, `ObjectPalette`, `LocationSelector`,
+`EnemySelectDialog` are already in the codebase (confirmed in repo
+review) — audit what's there against this milestone's decisions before
+writing new code, since some of this may already be partially correct.
+
+**Acceptance:** a creator can search/select a real-world location, place
+units from both factions with correct facing, define at least one
+objective of each type, save the mission, and immediately test-play it as
+either side from the builder with no separate launch step.
+
 ## Suggested task order for v1.1
 
-9 → 10 → 11 → 12 → 13 (replacement version only — ignore 13a–13f).
-Milestone 13 is now comparable in size to 9–12 individually, not larger —
-the LWJGL/3D scope that made it a separate project phase no longer applies.
+9 → 10 → 11 → 12 → 13 (replacement version only — ignore 13a–13f) → 14.
+Milestone 14 depends on 13 (needs the 2D map to place units on) but not on
+9–12 — could be parallelized against those if agent capacity allows.
 
 ---
 

@@ -8,17 +8,19 @@ import com.contactfront.ui.controller.GameController;
 import com.contactfront.ui.Palette;
 import com.contactfront.ui.TerrainBaker;
 import javafx.geometry.Bounds;
+import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Label;
+import javafx.scene.control.ToggleButton;
+import javafx.scene.image.Image;
 import javafx.scene.image.WritableImage;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
-import javafx.scene.shape.ArcType;
 import javafx.scene.text.TextAlignment;
 
 public class MapView {
@@ -232,9 +234,7 @@ public class MapView {
             flatTerrain(g, s, ts);
         }
 
-        if (!showSatellite) {
-            drawOsmOverlays(g, s, ts);
-        }
+        drawOsmOverlays(g, s, ts);
 
         if (s.smokeGrid != null) {
             for (int y = 0; y < s.height(); y++) {
@@ -279,6 +279,13 @@ public class MapView {
 
         for (Unit u : s.friendlyUnits) if (!u.destroyed) drawUnit(g, u, false, s, ts);
         for (Unit u : s.enemyUnits) if (!u.destroyed && u.knownToPlayer) drawUnit(g, u, true, s, ts);
+        
+        if (s.placedUnits != null && !s.placedUnits.isEmpty() && s.mode != null && s.mode.equals("scenario_editor")) {
+            for (Unit u : s.placedUnits) if (!u.destroyed) {
+                boolean isEnemy = u.faction != ctrl.state.playerFaction;
+                drawUnit(g, u, isEnemy, s, ts);
+            }
+        }
 
         for (Objective o : s.objectives) {
             g.setStroke(Palette.CAUTION);
@@ -353,56 +360,73 @@ public class MapView {
     }
 
     private void drawOsmOverlays(GraphicsContext g, GameState s, int ts) {
-        drawRoads(g, s, ts);
-        drawBuildings(g, s, ts);
+        double opacity = showSatellite ? 0.55 : 0.9;
+        drawRoads(g, s, ts, opacity);
+        drawBuildings(g, s, ts, opacity);
     }
 
-    private void drawRoads(GraphicsContext g, GameState s, int ts) {
+    private void drawRoads(GraphicsContext g, GameState s, int ts, double opacity) {
         for (RoadSegment road : s.roadSegments) {
             if (road.points() == null || road.points().size() < 2) continue;
-            int cx = -1, cy = -1;
+            int prevX = -1, prevY = -1;
             for (double[] pt : road.points()) {
-                int gx = lonToGrid(s, pt[0]);
-                int gy = latToGrid(s, pt[1]);
-                if (cx >= 0 && gy >= 0 && gy < s.height()) {
-                    g.setStroke(Color.web("#3a3a3c", 0.9));
+                int gx = lonToGrid(pt[0]);
+                int gy = latToGrid(pt[1]);
+                if (prevX >= 0 && prevX < s.width() && gx >= 0 && gx < s.width() &&
+                    prevY >= 0 && prevY < s.height() && gy >= 0 && gy < s.height()) {
+                    g.setStroke(Color.web("#3a3a3c", opacity));
                     g.setLineWidth(ts * 0.35);
-                    g.strokeLine(cx * ts + ts / 2, cy * ts + ts / 2, gx * ts + ts / 2, gy * ts + ts / 2);
+                    g.strokeLine(prevX * ts + ts / 2.0, prevY * ts + ts / 2.0, gx * ts + ts / 2.0, gy * ts + ts / 2.0);
                 }
-                cx = gx;
-                cy = gy;
+                prevX = gx;
+                prevY = gy;
             }
         }
     }
 
-    private void drawBuildings(GraphicsContext g, GameState s, int ts) {
+    private void drawBuildings(GraphicsContext g, GameState s, int ts, double opacity) {
         for (Building bldg : s.buildings) {
             if (bldg.footprint == null) continue;
-            int[] xs = new int[bldg.footprint.size()];
-            int[] ys = new int[bldg.footprint.size()];
+            double[] xs = new double[bldg.footprint.size()];
+            double[] ys = new double[bldg.footprint.size()];
             for (int i = 0; i < bldg.footprint.size(); i++) {
                 double[] pt = bldg.footprint.get(i);
-                xs[i] = lonToGrid(s, pt[0]) * ts;
-                ys[i] = latToGrid(s, pt[1]) * ts;
+                xs[i] = lonToGrid(pt[0]) * ts;
+                ys[i] = latToGrid(pt[1]) * ts;
             }
             if (xs.length >= 3) {
-                g.setFill(Color.web("#4a4a4a", 0.85));
+                g.setFill(Color.web("#4a4a4a", opacity));
                 g.fillPolygon(xs, ys, xs.length);
-                g.setStroke(Color.web("#22211f", 0.9));
+                g.setStroke(Color.web("#22211f", opacity));
                 g.setLineWidth(1);
                 g.strokePolygon(xs, ys, xs.length);
             }
         }
     }
 
-    private int lonToGrid(GameState s, double lon) {
-        double lonPerTile = 360.0 / s.width();
-        return (int) Math.round((lon - s.longitude + 180) / lonPerTile);
+    private int lonToGrid(double lon) {
+        double mercX = lonToWebMercatorX(lon);
+        double centerMercX = lonToWebMercatorX(ctrl.state.longitude);
+        double mercPerTile = 2.0 * 20037508.34 / (double) ctrl.state.width();
+        return (int) Math.round((mercX - centerMercX) / mercPerTile + ctrl.state.width() / 2.0);
     }
 
-    private int latToGrid(GameState s, double lat) {
-        double latPerTile = 180.0 / s.height();
-        return (int) Math.round((s.latitude - lat + 90) / latPerTile);
+    private int latToGrid(double lat) {
+        double mercY = latToWebMercatorY(lat);
+        double centerMercY = latToWebMercatorY(ctrl.state.latitude);
+        double mercPerTile = 2.0 * 20037508.34 / (double) ctrl.state.height();
+        return (int) Math.round((centerMercY - mercY) / mercPerTile + ctrl.state.height() / 2.0);
+    }
+    
+    private double lonToWebMercatorX(double lon) {
+        double r = 6378137;
+        return r * Math.toRadians(lon);
+    }
+    
+    private double latToWebMercatorY(double lat) {
+        double r = 6378137;
+        double latRad = Math.toRadians(lat);
+        return r * Math.log(Math.tan(Math.PI / 4 + latRad / 2));
     }
 
     private void drawUnit(GraphicsContext g, Unit u, boolean enemy, GameState s, int ts) {

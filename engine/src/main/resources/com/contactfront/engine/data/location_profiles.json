@@ -1,0 +1,92 @@
+{
+  "locations": [
+    {
+      "name": "San Francisco, CA",
+      "bounding_box": {
+        "min_lat": 37.708,
+        "max_lat": 37.828,
+        "min_lon": -122.516,
+        "max_lon": -122.356
+      },
+      "tags": ["urban", "coastal", "hilly"],
+      "seed_hint": 1700000000000
+    },
+    {
+      "name": "Berlin, Germany",
+      "bounding_box": {
+        "min_lat": 52.338,
+        "max_lat": 52.675,
+        "min_lon": 13.088,
+        "max_lon": 13.761
+      },
+      "tags": ["urban", "historical"],
+      "seed_hint": 1609459200000
+    },
+    {
+      "name": "Kandahar, Afghanistan",
+      "bounding_box": {
+        "min_lat": 31.483,
+        "max_lat": 31.633,
+        "min_lon": 65.650,
+        "max_lon": 65.816
+      },
+      "tags": ["desert", "rural", "mountainous"],
+      "seed_hint": 1577836800000
+    },
+    {
+      "name": "Seoul, South Korea",
+      "bounding_box": {
+        "min_lat": 37.413,
+        "max_lat": 37.691,
+        "min_lon": 126.772,
+        "max_lon": 127.182
+      },
+      "tags": ["urban", "industrial", "mountainous"],
+      "seed_hint": 1606771200000
+    },
+    {
+      "name": "Manhattan, New York",
+      "bounding_box": {
+        "min_lat": 40.675,
+        "max_lat": 40.829,
+        "min_lon": -74.036,
+        "max_lon": -73.910
+      },
+      "tags": ["urban", "dense", "financial"],
+      "seed_hint": 1577836800000
+    },
+    {
+      "name": "Iraqi Desert, Iraq",
+      "bounding_box": {
+        "min_lat": 31.0,
+        "max_lat": 34.0,
+        "min_lon": 42.0,
+        "max_lon": 48.0
+      },
+      "tags": ["desert", "open", "sparse"],
+      "seed_hint": 1606771200000
+    },
+    {
+      "name": "Vancouver, Canada",
+      "bounding_box": {
+        "min_lat": 49.150,
+        "max_lat": 49.400,
+        "min_lon": -123.380,
+        "max_lon": -122.900
+      },
+      "tags": ["urban", "coastal", "mountainous"],
+      "seed_hint": 1609459200000
+    },
+    {
+      "name": "Baghdad, Iraq",
+      "bounding_box": {
+        "min_lat": 33.180,
+        "max_lat": 33.350,
+        "min_lon": 44.200,
+        "max_lon": 44.500
+      },
+      "tags": ["urban", "desert", "historical"],
+      "seed_hint": 1577836800000
+    }
+  ]
+}

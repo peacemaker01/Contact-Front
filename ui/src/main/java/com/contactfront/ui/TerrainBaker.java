@@ -2,7 +2,6 @@ package com.contactfront.ui;
 
 import com.contactfront.engine.model.GameState;
 import com.contactfront.engine.model.Terrain;
-import javafx.embed.swing.SwingFXUtils;
 import javafx.scene.image.Image;
 import javafx.scene.image.PixelWriter;
 import javafx.scene.image.WritableImage;
@@ -15,6 +14,21 @@ import java.io.IOException;
 public final class TerrainBaker {
 
     private TerrainBaker() {}
+
+    public static WritableImage toWritableImage(Image img) {
+        if (img == null) return null;
+        int w = (int) img.getWidth();
+        int h = (int) img.getHeight();
+        WritableImage writable = new WritableImage(w, h);
+        javafx.scene.image.PixelWriter pw = writable.getPixelWriter();
+        javafx.scene.image.PixelReader pr = img.getPixelReader();
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                pw.setArgb(x, y, pr.getArgb(x, y));
+            }
+        }
+        return writable;
+    }
 
     // Photorealistic color palette (sRGB, 0xRRGGBB)
     private static final int DEEP_WATER     = 0x0d1b2a;  // Deep ocean

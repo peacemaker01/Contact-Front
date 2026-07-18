@@ -7,6 +7,8 @@ import com.contactfront.engine.model.GameState;
 import com.contactfront.engine.model.Terrain;
 import com.contactfront.engine.model.Tile;
 import com.contactfront.engine.model.Unit;
+import com.contactfront.engine.model.UnitProfile;
+import com.contactfront.engine.data.Profiles;
 import com.contactfront.ui.view.ScenarioBuilder.ScenarioBuilderData;
 
 import java.io.*;
@@ -60,20 +62,12 @@ public final class ScenarioSerializer {
         
         json.append(JSON_INDENT).append("\"units\": [\n");
         boolean firstUnit = true;
-        for (Unit u : state.friendlyUnits) {
+        List<Unit> unitsToSave = state.placedUnits.isEmpty() ? state.friendlyUnits : state.placedUnits;
+        for (Unit u : unitsToSave) {
             if (!firstUnit) json.append(",\n");
             json.append(JSON_INDENT).append(JSON_INDENT)
-                .append("{\"faction\": \"friendly\", \"profileId\": \"").append(u.profile.id()).append("\"")
-                .append(", \"x\": ").append(u.x)
-                .append(", \"y\": ").append(u.y)
-                .append(", \"id\": ").append(u.id)
-                .append(", \"destroyed\": ").append(u.destroyed).append("}");
-            firstUnit = false;
-        }
-        for (Unit u : state.enemyUnits) {
-            if (!firstUnit) json.append(",\n");
-            json.append(JSON_INDENT).append(JSON_INDENT)
-                .append("{\"faction\": \"enemy\", \"profileId\": \"").append(u.profile.id()).append("\"")
+                .append("{\"faction\": \"").append(u.faction.name()).append("\"")
+                .append(", \"profileId\": \"").append(u.profile.id()).append("\"")
                 .append(", \"x\": ").append(u.x)
                 .append(", \"y\": ").append(u.y)
                 .append(", \"id\": ").append(u.id)
@@ -90,7 +84,14 @@ public final class ScenarioSerializer {
                 .append("{\"name\": \"").append(obj.name).append("\"")
                 .append(", \"type\": \"").append(obj.type).append("\"")
                 .append(", \"x\": ").append(obj.x)
-                .append(", \"y\": ").append(obj.y).append("}");
+                .append(", \"y\": ").append(obj.y);
+            if (obj.requiredTurns > 0) {
+                json.append(", \"requiredTurns\": ").append(obj.requiredTurns);
+            }
+            if (obj.targetUnitId != 0) {
+                json.append(", \"targetUnitId\": ").append(obj.targetUnitId);
+            }
+            json.append("}");
             firstObj = false;
         }
         json.append("\n").append(JSON_INDENT).append("]\n");
@@ -154,7 +155,58 @@ public final class ScenarioSerializer {
             }
         }
         
+        parseUnits(json, state, data);
+        parseObjectives(json, state);
+        
         return state;
+    }
+    
+    private static void parseObjectives(String json, GameState state) {
+        List<String> objSection = extractArray(json, "objectives");
+        for (String objJson : objSection) {
+            String name = extractString(objJson, "name", "Objective");
+            String type = extractString(objJson, "type", "capture");
+            int x = (int) extractNumber(objJson, "x", 0);
+            int y = (int) extractNumber(objJson, "y", 0);
+            int requiredTurns = (int) extractNumber(objJson, "requiredTurns", 3);
+            int targetUnitId = (int) extractNumber(objJson, "targetUnitId", 0);
+            
+            com.contactfront.engine.model.Objective obj = new com.contactfront.engine.model.Objective(
+                "OBJ_" + state.objectives.size(), name, x, y, type);
+            obj.requiredTurns = requiredTurns;
+            obj.targetUnitId = targetUnitId;
+            state.objectives.add(obj);
+        }
+    }
+    
+    private static void parseUnits(String json, GameState state, ScenarioBuilderData data) {
+        List<String> unitsSection = extractArray(json, "units");
+        Profiles profiles = Profiles.load();
+        int nextId = 1;
+        
+        for (String unitJson : unitsSection) {
+            String factionStr = extractString(unitJson, "faction", "USA");
+            Faction placedFaction = Faction.valueOf(factionStr);
+            String profileId = extractString(unitJson, "profileId", "inf_squad");
+            int x = (int) extractNumber(unitJson, "x", 0);
+            int y = (int) extractNumber(unitJson, "y", 0);
+            
+            UnitProfile profile = profiles.unit(profileId);
+            if (profile == null) profile = profiles.unit("inf_squad");
+            
+            Unit unit = new Unit(nextId++, placedFaction, profile, x, y, profiles);
+            unit.destroyed = extractString(unitJson, "destroyed", "false").equals("true");
+            
+            state.placedUnits.add(unit);
+        }
+        
+        for (Unit u : state.placedUnits) {
+            if (u.faction == data.playerFaction()) {
+                state.friendlyUnits.add(u);
+            } else {
+                state.enemyUnits.add(u);
+            }
+        }
     }
 
     private static String extractString(String json, String key, String defaultValue) {

@@ -36,6 +36,26 @@
             <version>20240303</version>
         </dependency>
         <dependency>
+            <groupId>org.geotools</groupId>
+            <artifactId>gt-main</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.geotools</groupId>
+            <artifactId>gt-wmts</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.geotools</groupId>
+            <artifactId>gt-geotiff</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.geotools</groupId>
+            <artifactId>gt-epsg-hsql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.locationtech.jts</groupId>
+            <artifactId>jts-core</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
@@ -73,24 +93,21 @@
             <plugin>
                 <groupId>org.panteleyev</groupId>
                 <artifactId>jpackage-maven-plugin</artifactId>
-                <version>1.5.1</version>
+                <version>1.7.0</version>
                 <configuration>
-                    <type>exe</type>
-                    <winShortcut>true</winShortcut>
-                    <winMenu>true</winMenu>
-                    <winMenuGroup>Contact Front</winMenuGroup>
+                    <type>APP_IMAGE</type>
+                    <winShortcut>false</winShortcut>
+                    <winMenu>false</winMenu>
                     <appVersion>1.0.0</appVersion>
                     <vendor>Contact Front</vendor>
                     <mainClass>com.contactfront.ui.App</mainClass>
                     <mainJar>contact-front-ui-1.0.0.jar</mainJar>
                     <input>${project.build.directory}</input>
-                    <dest>${project.build.directory}/dist</dest>
+                    <destination>${project.build.directory}/dist</destination>
+                    <name>Contact Front</name>
                     <javaOptions>
                         <option>-Xmx512m</option>
                     </javaOptions>
-                    <winJre>
-                        <jrePath>jre</jrePath>
-                    </winJre>
                 </configuration>
             </plugin>
         </plugins>

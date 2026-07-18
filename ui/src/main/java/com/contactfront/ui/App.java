@@ -1,6 +1,7 @@
 package com.contactfront.ui;
 
 import com.contactfront.engine.TacticalEngine;
+import com.contactfront.engine.TickProcessor;
 import com.contactfront.engine.data.Profiles;
 import com.contactfront.engine.model.CommandMode;
 import com.contactfront.engine.model.Doctrine;
@@ -10,16 +11,19 @@ import com.contactfront.engine.model.Terrain;
 import com.contactfront.engine.model.Tile;
 import com.contactfront.engine.model.Unit;
 import com.contactfront.engine.model.UnitProfile;
-import com.contactfront.ui.assets.GoogleMapsClient;
+import com.contactfront.ui.assets.MapTilerClient;
+import com.contactfront.ui.assets.MapTilerClient.SatelliteImage;
 import com.contactfront.ui.assets.OverpassApiClient;
 import com.contactfront.ui.assets.OverpassApiClient.OsmData;
 import com.contactfront.ui.assets.SatelliteImageProcessor;
 import com.contactfront.ui.controller.GameController;
 import com.contactfront.ui.view.*;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
+import javafx.scene.image.Image;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.*;
 import javafx.scene.Node;
@@ -29,7 +33,6 @@ import javafx.stage.Stage;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.Random;
-import javafx.animation.AnimationTimer;
 
 public class App extends Application {
     private GameController ctrl;
@@ -43,9 +46,8 @@ public class App extends Application {
     private Stage primaryStage;
     private Faction playerFaction = Faction.USA;
     private Faction enemyFaction = Faction.RUSSIA;
-    private AnimationTimer gameLoop;
+    private TickProcessor tickProcessor;
     private static final long TICK_MS = 500;
-    private long lastTickNs = 0;
 
     @Override
     public void start(Stage stage) {
@@ -65,15 +67,14 @@ public class App extends Application {
     }
 
     private void handleLocationSelection(LocationSelector.LocationSelection loc) {
-        if (!GoogleMapsClient.getApiKey().isEmpty()) {
+        if (!MapTilerClient.getApiKey().isEmpty()) {
             try {
-                GoogleMapsClient.SatelliteImage satImg = GoogleMapsClient.downloadSatelliteImage(
+                SatelliteImage satImg = MapTilerClient.downloadSatelliteImage(
                     loc.latitude(), loc.longitude(), 16, 512);
                 int gameW = 28, gameH = 20;
                 SatelliteImageProcessor.SatelliteTerrainData terrainData =
                     SatelliteImageProcessor.processSatelliteImage(satImg.data(), gameW, gameH);
 
-                // Calculate bbox for OSM fetch (~2km window at zoom 16)
                 double degPerTile = 360.0 / Math.pow(2, 16) * 512;
                 double minLat = loc.latitude() - degPerTile / 2;
                 double maxLat = loc.latitude() + degPerTile / 2;
@@ -110,7 +111,6 @@ public class App extends Application {
                 state.grid = grid;
                 state.ensureVisibility();
 
-                // Apply OSM data to semantic grid
                 com.contactfront.ui.assets.OsmSemanticGrid.apply(state,
                     osmData.roads(), osmData.buildings());
                 state.roadSegments.addAll(osmData.roads());
@@ -151,6 +151,16 @@ public class App extends Application {
     private void showGame() {
         Log.info("Showing game - state: " + (ctrl.state != null ? "ready w=" + ctrl.state.width() : "null"));
         mapView = new MapView(ctrl, 30);
+        if (ctrl.state != null && ctrl.state.elevation != null && !MapTilerClient.getApiKey().isEmpty()) {
+            try {
+                SatelliteImage satImg = MapTilerClient.downloadSatelliteImage(
+                    ctrl.state.latitude, ctrl.state.longitude, 16, 512);
+                mapView.setSatelliteImage(new javafx.scene.image.Image(
+                    new java.io.ByteArrayInputStream(satImg.data())));
+            } catch (Exception e) {
+                Log.error("Failed to load satellite image for toggle: " + e.getMessage());
+            }
+        }
         sidePanel = new SidePanel(ctrl);
         topStatus = new TopStatus();
         eventLog = new EventLog();
@@ -178,30 +188,34 @@ public class App extends Application {
         primaryStage.setMinHeight(600);
         primaryStage.show();
 
-        // Ensure map is drawn after scene is shown
         mapView.redraw();
         scene.setOnKeyPressed(e -> handleKey(e));
-        startGameLoop();
+        startTickProcessor();
         refreshAll();
     }
     
-    private void startGameLoop() {
-        if (gameLoop != null) gameLoop.stop();
-        lastTickNs = System.nanoTime();
-        gameLoop = new AnimationTimer() {
+    private void startTickProcessor() {
+        if (tickProcessor != null) {
+            tickProcessor.stop();
+        }
+        
+        tickProcessor = new TickProcessor(ctrl.engine, TICK_MS, new TickProcessor.TickListener() {
             @Override
-            public void handle(long now) {
-                long elapsedNs = now - lastTickNs;
-                if (elapsedNs >= TICK_MS * 1_000_000) {
-                    if (ctrl != null && ctrl.state != null && !ctrl.state.gameOver) {
-                        ctrl.engine.tick();
-                    }
-                    lastTickNs = now;
-                }
-                mapView.redraw();
+            public void onTick(long tickNumber, long elapsedMs) {
+                Platform.runLater(App.this::refreshAll);
             }
-        };
-        gameLoop.start();
+            
+            @Override
+            public void onRunning() {
+                Log.info("TickProcessor started - tick interval: " + TICK_MS + "ms");
+            }
+            
+            @Override
+            public void onStopped() {
+                Log.info("TickProcessor stopped");
+            }
+        });
+        tickProcessor.start();
     }
     
     private Unit spawnUnit(GameState s, String profileId, Faction f, int ax, int ay, int id, Profiles profiles) {
@@ -239,10 +253,10 @@ public class App extends Application {
         double latitude = lat != null ? lat : (Math.random() * 160 - 80);
         double longitude = lon != null ? lon : (Math.random() * 360 - 180);
 
-        if (!GoogleMapsClient.getApiKey().isEmpty()) {
+        if (!MapTilerClient.getApiKey().isEmpty()) {
             try {
                 int gameW = 28, gameH = 20;
-                GoogleMapsClient.SatelliteImage satImg = GoogleMapsClient.downloadSatelliteImage(
+                SatelliteImage satImg = MapTilerClient.downloadSatelliteImage(
                     latitude, longitude, 16, 512);
                 SatelliteImageProcessor.SatelliteTerrainData terrainData =
                     SatelliteImageProcessor.processSatelliteImage(satImg.data(), gameW, gameH);
@@ -343,7 +357,7 @@ public class App extends Application {
         Button menuBtn = new Button("Main Menu");
         menuBtn.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
         menuBtn.setOnAction(e -> {
-            if (gameLoop != null) gameLoop.stop();
+            if (tickProcessor != null) tickProcessor.stop();
             sceneRoot.getChildren().clear();
             aarOverlay = null;
             showMainMenu();
@@ -352,11 +366,10 @@ public class App extends Application {
         Button pauseBtn = new Button("Pause");
         pauseBtn.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-border-color:#5a6e82;");
         pauseBtn.setOnAction(e -> {
-            if (gameLoop != null) {
-                gameLoop.stop();
-                gameLoop = null;
+            if (tickProcessor != null && tickProcessor.isRunning()) {
+                tickProcessor.stop();
             } else {
-                startGameLoop();
+                tickProcessor.resume();
             }
         });
 
@@ -368,7 +381,7 @@ public class App extends Application {
         load.setOnAction(e -> doLoad());
         MenuItem exitToMenu = new MenuItem("Exit to Main Menu");
         exitToMenu.setOnAction(e -> {
-            if (gameLoop != null) gameLoop.stop();
+            if (tickProcessor != null) tickProcessor.stop();
             sceneRoot.getChildren().clear();
             aarOverlay = null;
             showMainMenu();
@@ -453,6 +466,8 @@ public class App extends Application {
             ctrl.selected = null;
             ctrl.selection.clear();
             if (aarOverlay != null) { sceneRoot.getChildren().remove(aarOverlay); aarOverlay = null; }
+            ctrl.engine.start();
+            startTickProcessor();
             refreshAll();
         } catch (Exception ex) {
             System.err.println("Load failed: " + ex.getMessage());
@@ -462,9 +477,9 @@ public class App extends Application {
     private void showOptions() {
         Log.info("Opening options dialog");
         OptionsDialog dialog = new OptionsDialog(primaryStage, data -> {
-            GoogleMapsClient.setApiKey(data.googleMapsApiKey());
-            GoogleMapsClient.setCacheDir(Path.of("cache/maps"));
-            Log.info("Options saved - API key: " + (data.googleMapsApiKey().isEmpty() ? "none" : "***"));
+            MapTilerClient.setApiKey(data.mapTilerApiKey());
+            MapTilerClient.setCacheDir(Path.of("cache/maps"));
+            Log.info("Options saved - API key: " + (data.mapTilerApiKey().isEmpty() ? "none" : "***"));
         });
         dialog.show();
     }
@@ -481,13 +496,27 @@ public class App extends Application {
         ctrl = new GameController();
         ctrl.profiles = Profiles.load();
         ctrl.onUpdate = this::refreshAll;
+        
+        Faction playerFaction = this.playerFaction;
+        Faction enemyFaction = this.enemyFaction;
+        
         ctrl.state = data.state();
         ctrl.state.mode = "scenario_editor";
         ctrl.state.commandMode = data.commandMode();
-        ctrl.state.playerFaction = data.playerFaction();
-        ctrl.state.enemyFaction = data.enemyFaction();
-        ctrl.state.factionDoctrines.put(data.playerFaction(), data.playerDoctrine());
-        ctrl.state.factionDoctrines.put(data.enemyFaction(), data.enemyDoctrine());
+        ctrl.state.playerFaction = playerFaction;
+        ctrl.state.enemyFaction = enemyFaction;
+        ctrl.state.factionDoctrines.put(playerFaction, data.playerDoctrine());
+        ctrl.state.factionDoctrines.put(enemyFaction, data.enemyDoctrine());
+        
+        for (Unit u : ctrl.state.placedUnits) {
+            if (u.faction == playerFaction) {
+                ctrl.state.friendlyUnits.add(u);
+            } else {
+                ctrl.state.enemyUnits.add(u);
+            }
+        }
+        ctrl.state.placedUnits.clear();
+        
         ctrl.engine = new TacticalEngine(ctrl.state, new Random());
         ctrl.engine.start();
         startScenarioGame();
@@ -495,6 +524,16 @@ public class App extends Application {
 
     private void startScenarioGame() {
         mapView = new MapView(ctrl, 30);
+        if (ctrl.state != null && ctrl.state.elevation != null && !MapTilerClient.getApiKey().isEmpty()) {
+            try {
+                SatelliteImage satImg = MapTilerClient.downloadSatelliteImage(
+                    ctrl.state.latitude, ctrl.state.longitude, 16, 512);
+                mapView.setSatelliteImage(new javafx.scene.image.Image(
+                    new java.io.ByteArrayInputStream(satImg.data())));
+            } catch (Exception e) {
+                Log.error("Failed to load satellite image for toggle: " + e.getMessage());
+            }
+        }
         sidePanel = new SidePanel(ctrl);
         topStatus = new TopStatus();
         eventLog = new EventLog();
@@ -524,7 +563,7 @@ public class App extends Application {
 
         mapView.redraw();
         scene.setOnKeyPressed(e -> handleKey(e));
-        startGameLoop();
+        startTickProcessor();
         refreshAll();
     }
 
