@@ -1,5 +1,6 @@
 package com.contactfront.ui.view;
 
+import com.contactfront.ui.Log;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;

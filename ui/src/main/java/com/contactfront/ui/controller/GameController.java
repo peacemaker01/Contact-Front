@@ -52,7 +52,6 @@ public class GameController {
         selected = null;
         selection.clear();
         groups.clear();
-        refresh();
     }
 
     public void click(int tx, int ty) {
