@@ -2,7 +2,6 @@ package com.contactfront.engine;
 
 import com.contactfront.engine.model.*;
 import com.contactfront.engine.rules.*;
-import com.contactfront.ui.Log;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -51,12 +50,14 @@ public final class TacticalEngine {
     }
 
     private void processMovement(GameState s) {
+        int movesStarted = 0;
         for (Unit u : s.friendlyUnits) {
-            if (Movement.isInMotion(u)) Movement.tickMove(s, u);
+            if (Movement.isInMotion(u)) { movesStarted++; Movement.tickMove(s, u); }
         }
         for (Unit u : s.enemyUnits) {
-            if (Movement.isInMotion(u)) Movement.tickMove(s, u);
+            if (Movement.isInMotion(u)) { movesStarted++; Movement.tickMove(s, u); }
         }
+        Log.info("TacticalEngine: Processed movement for " + movesStarted + " units in motion");
     }
 
     public void runAiTick() {

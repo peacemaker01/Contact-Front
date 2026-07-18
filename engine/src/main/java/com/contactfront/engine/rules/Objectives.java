@@ -1,5 +1,6 @@
 package com.contactfront.engine.rules;
 
+import com.contactfront.engine.Log;
 import com.contactfront.engine.model.GameState;
 import com.contactfront.engine.model.Objective;
 import com.contactfront.engine.model.Unit;
@@ -13,6 +14,7 @@ public final class Objectives {
     private static final Map<String, Integer> holdStartTurns = new HashMap<>();
 
     public static boolean check(GameState s) {
+        Log.info("Objectives.check: turn " + s.turn + ", objectives=" + s.objectives.size());
         boolean allRequiredCaptured = true;
         for (Objective o : s.objectives) {
             boolean captured = false;
@@ -68,6 +70,7 @@ public final class Objectives {
         }
         
         if (allRequiredCaptured && !s.objectives.isEmpty()) {
+            Log.info("Objectives.check: Victory!");
             s.victory = true;
             s.gameOver = true;
             s.log("orders", "All objectives secured. Victory.");
@@ -75,14 +78,17 @@ public final class Objectives {
         }
         
         if (s.enemyUnits.stream().allMatch(u -> u.destroyed)) {
+            Log.info("Objectives.check: Victory (enemy eliminated)");
             s.victory = true; s.gameOver = true; s.log("orders", "All enemy forces eliminated. Victory.");
             return true;
         }
         if (s.friendlyUnits.stream().allMatch(u -> u.destroyed)) {
+            Log.info("Objectives.check: Defeat (all friendly destroyed)");
             s.victory = false; s.gameOver = true; s.log("orders", "Friendly forces wiped out. Defeat.");
             return true;
         }
         if (s.turn >= s.maxTurns) {
+            Log.info("Objectives.check: Defeat (turn limit)");
             s.victory = false; s.gameOver = true; s.log("orders", "Turn limit reached. Mission failed.");
             return true;
         }

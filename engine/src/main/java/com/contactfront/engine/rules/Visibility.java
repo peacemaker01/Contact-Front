@@ -1,5 +1,6 @@
 package com.contactfront.engine.rules;
 
+import com.contactfront.engine.Log;
 import com.contactfront.engine.model.GameState;
 import com.contactfront.engine.model.Unit;
 
@@ -7,6 +8,7 @@ public final class Visibility {
     private Visibility() {}
 
     public static void computePlayerVisibility(GameState s) {
+        Log.info("Visibility.computePlayerVisibility: computing for " + s.friendlyUnits.size() + " friendly units");
         s.ensureVisibility();
         for (int y = 0; y < s.height(); y++) {
             for (int x = 0; x < s.width(); x++) {
@@ -31,11 +33,15 @@ public final class Visibility {
                 }
             }
         }
+        int newlySeen = 0;
         for (Unit e : s.enemyUnits) {
             if (e.destroyed) continue;
             boolean vis = s.visibility[e.y][e.x] == com.contactfront.engine.model.Visibility.VISIBLE;
             if (vis) {
-                if (!e.knownToPlayer) s.log("intel", "New contact: " + e.profile.name() + " at (" + e.x + "," + e.y + ").");
+                if (!e.knownToPlayer) {
+                    newlySeen++;
+                    s.log("intel", "New contact: " + e.profile.name() + " at (" + e.x + "," + e.y + ").");
+                }
                 e.knownToPlayer = true;
                 e.lastKnownX = e.x;
                 e.lastKnownY = e.y;
@@ -44,6 +50,7 @@ public final class Visibility {
                 s.log("intel", "Lost contact: " + e.profile.name() + " last seen (" + e.lastKnownX + "," + e.lastKnownY + ").");
             }
         }
+        Log.info("Visibility.computePlayerVisibility: " + newlySeen + " units newly seen");
     }
 
     private static void revealAround(GameState s, int cx, int cy, int radius) {

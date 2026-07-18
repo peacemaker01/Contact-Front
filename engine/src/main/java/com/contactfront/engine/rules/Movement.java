@@ -1,5 +1,6 @@
 package com.contactfront.engine.rules;
 
+import com.contactfront.engine.Log;
 import com.contactfront.engine.model.GameState;
 import com.contactfront.engine.model.Tile;
 import com.contactfront.engine.model.Unit;
@@ -37,13 +38,29 @@ public final class Movement {
     }
 
     public static boolean applyMove(GameState s, Unit u, int tx, int ty) {
-        if (tx < 0 || ty < 0 || tx >= s.width() || ty >= s.height()) return false;
-        if (tx == u.x && ty == u.y) return false;
+        if (tx < 0 || ty < 0 || tx >= s.width() || ty >= s.height()) {
+            Log.info("Movement.applyMove: rejected out of bounds (" + tx + "," + ty + ")");
+            return false;
+        }
+        if (tx == u.x && ty == u.y) {
+            Log.info("Movement.applyMove: rejected same position (" + tx + "," + ty + ")");
+            return false;
+        }
         double budget = u.effectiveMovementPoints() * u.stance.moveMult;
         double cost = pathCost(s.grid, u.x, u.y, tx, ty, u.profile.category());
-        if (cost == Double.POSITIVE_INFINITY) return false;
-        if (cost > budget) return false;
-        if (occupied(s, tx, ty, u)) return false;
+        if (cost == Double.POSITIVE_INFINITY) {
+            Log.warning("Movement.applyMove: rejected impassable path for " + u.profile.name());
+            return false;
+        }
+        if (cost > budget) {
+            Log.info("Movement.applyMove: rejected - insufficient MP (" + budget + " < " + cost + ")");
+            return false;
+        }
+        if (occupied(s, tx, ty, u)) {
+            Log.info("Movement.applyMove: rejected occupied target (" + tx + "," + ty + ")");
+            return false;
+        }
+        Log.info("Movement.applyMove: moving " + u.profile.name() + " to (" + tx + "," + ty + ") cost=" + cost);
         u.x = tx;
         u.y = ty;
         u.movementPoints -= cost;
@@ -77,11 +94,15 @@ public final class Movement {
     }
 
     public static void tickMove(GameState s, Unit u) {
-        if (u.destX < 0 || u.destroyed) return;
+        if (u.destX < 0 || u.destroyed) {
+            Log.info("Movement.tickMove: " + (u.destroyed ? "destroyed" : "no destination") + " for " + u.profile.name());
+            return;
+        }
 
         int dx = Integer.compare(u.destX, u.x);
         int dy = Integer.compare(u.destY, u.y);
         if (dx == 0 && dy == 0) {
+            Log.info("Movement.tickMove: reached destination (" + u.x + "," + u.y + ")");
             u.destX = -1;
             u.destY = -1;
             u.stepsRemaining = 0;
@@ -92,23 +113,27 @@ public final class Movement {
         int ny = u.y + dy;
 
         if (nx < 0 || ny < 0 || nx >= s.width() || ny >= s.height()) {
+            Log.warning("Movement.tickMove: out of bounds abort for " + u.profile.name());
             u.destX = -1;
             u.destY = -1;
             u.stepsRemaining = 0;
             return;
         }
         if (occupied(s, nx, ny, u)) {
+            Log.info("Movement.tickMove: blocked at (" + nx + "," + ny + ")");
             u.destX = -1;
             u.destY = -1;
             u.stepsRemaining = 0;
             return;
         }
 
+        Log.info("Movement.tickMove: " + u.profile.name() + " moving to (" + nx + "," + ny + ")");
         u.x = nx;
         u.y = ny;
         u.stepsRemaining--;
 
         if (u.stepsRemaining <= 0 || (u.x == u.destX && u.y == u.destY)) {
+            Log.info("Movement.tickMove: arrival complete for " + u.profile.name());
             u.destX = -1;
             u.destY = -1;
             u.stepsRemaining = 0;

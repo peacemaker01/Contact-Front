@@ -7,6 +7,7 @@ import com.contactfront.engine.rules.LineOfSight;
 import com.contactfront.engine.rules.Movement;
 import com.contactfront.engine.terrain.ScenarioGenerator;
 import com.contactfront.engine.terrain.ScenarioGenerator.ScenarioSpec;
+import com.contactfront.ui.Log;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -71,6 +72,7 @@ public class GameController {
     }
 
     public void click(int tx, int ty) {
+        Log.info("GameController.click: (" + tx + "," + ty + ") selection=" + selection.size());
         if (tx < 0 || ty < 0 || tx >= state.width() || ty >= state.height()) return;
         if (selection.isEmpty()) {
             selectAt(tx, ty);
@@ -79,6 +81,7 @@ public class GameController {
         Unit enemy = state.enemyUnitAt(tx, ty);
         Unit friendly = state.friendlyUnitAt(tx, ty);
         if (enemy != null && enemy.knownToPlayer && !enemy.destroyed) {
+            Log.info("GameController.click: targeting enemy " + enemy.profile.name());
             for (Unit u : selection) {
                 if (LineOfSight.hasLineOfSight(u.x, u.y, enemy.x, enemy.y, state)) {
                     int dist = Math.abs(u.x - enemy.x) + Math.abs(u.y - enemy.y);
@@ -90,15 +93,18 @@ public class GameController {
                         }
                     }
                     if (inRange) {
+                        Log.info("GameController.click: attack order issued");
                         engine.resolveAction(new AttackAction(u.id, enemy.id), false);
                     }
                 }
             }
             selection.clear();
         } else if (friendly != null && friendly.hasSpecial("resupply_source") && !friendly.destroyed) {
+            Log.info("GameController.click: resupply target");
             for (Unit u : selection) {
                 int dist = Math.abs(u.x - friendly.x) + Math.abs(u.y - friendly.y);
                 if (dist <= 1 && u.totalAmmo() < u.weapons.stream().mapToInt(w -> w.maxAmmo).sum()) {
+                    Log.info("GameController.click: resupply order for " + u.profile.name());
                     engine.resolveAction(new ResupplyAction(u.id), false);
                 }
             }

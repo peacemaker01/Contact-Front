@@ -29,6 +29,10 @@ public final class Log {
         log("ERROR", msg);
     }
     
+    public static void warning(String msg) {
+        log("WARN", msg);
+    }
+    
     private static void log(String level, String msg) {
         String line = "[" + LocalDateTime.now().format(TS) + "] [" + level + "] " + msg;
         System.out.println(line);

@@ -1,7 +1,7 @@
 package com.contactfront.engine.rules;
 
+import com.contactfront.engine.*;
 import com.contactfront.engine.model.*;
-import com.contactfront.ui.Log;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -164,6 +164,7 @@ if (u.profile.category() == UnitCategory.ARMOR) {
     }
 
     public static void continuousRun(GameState s, Random rng) {
+        Log.info("AiTurn.continuousRun: Evaluating turn " + s.turn + " for " + s.enemyUnits.size() + " enemy units");
         // Director evaluation for support assets
         Director.evaluate(s, s.turn);
 
@@ -171,6 +172,7 @@ if (u.profile.category() == UnitCategory.ARMOR) {
             if (enemy.destroyed || enemy.routed) continue;
 
             if (enemy.hasSpecial("kamikaze")) {
+                Log.info("AiTurn: Processing kamikaze unit " + enemy.profile.name());
                 Unit t = closestVisibleFriendly(s, enemy);
                 if (t != null && manhattan(enemy.x, enemy.y, t.x, t.y) <= enemyReconOrWeapon(s, enemy, t)) {
                     FpvAttack.strike(s, enemy, t, rng);
@@ -185,6 +187,7 @@ if (u.profile.category() == UnitCategory.ARMOR) {
                 .map(Director.ActionScore::action)
                 .orElse("hold_position");
 
+            Log.info("AiTurn: Unit " + enemy.profile.name() + " action=" + chosenAction);
             Unit target = closestVisibleFriendly(s, enemy);
             int tx = s.width() / 2;
             int ty = s.height() / 2;

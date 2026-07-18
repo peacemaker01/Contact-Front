@@ -1,5 +1,6 @@
 package com.contactfront.engine.rules;
 
+import com.contactfront.engine.Log;
 import com.contactfront.engine.model.GameState;
 import com.contactfront.engine.model.Faction;
 import com.contactfront.engine.model.Unit;
@@ -7,10 +8,6 @@ import com.contactfront.engine.model.Doctrine;
 
 import java.util.List;
 
-/**
- * Director layer (Zeus-inspired): evaluates overall battle state at intervals,
- * makes force-level decisions without replacing unit AI.
- */
 public final class Director {
     private Director() {}
 
@@ -18,7 +15,7 @@ public final class Director {
     private static int lastArtilleryCheckTurn = 0;
 
     public static void evaluate(GameState s, int currentTurn) {
-        // Check momentum/casualty ratios every 30 seconds (60 ticks)
+        Log.info("Director.evaluate: turn " + currentTurn + " (player=" + s.friendlyUnits.size() + ", enemy=" + s.enemyUnits.size() + ")");
         if (currentTurn - lastCasCheckTurn >= 60) {
             lastCasCheckTurn = currentTurn;
             maybeCallCas(s);
@@ -40,10 +37,9 @@ public final class Director {
             .mapToInt(u -> (int)u.strength)
             .sum();
 
-        // Call CAS if enemy has significant force and we're losing
         double ratio = (double) friendlyStrength / Math.max(1, enemyStrength);
+        Log.info("Director.maybeCallCas: ratio=" + String.format("%.2f", ratio) + " cas=" + s.enemyCasAvailable);
         if (ratio < 0.7 && s.enemyCasAvailable > 0) {
-            // Find clustered enemy units
             double avgX = s.enemyUnits.stream()
                 .filter(u -> !u.destroyed)
                 .mapToInt(u -> u.x)
@@ -64,6 +60,7 @@ public final class Director {
             ));
             s.enemyCasAvailable--;
             s.log("orders", "Director calls for CAS on enemy cluster.");
+            Log.info("Director.maybeCallCas: CAS scheduled on (" + foeX + "," + foeY + ")");
         }
     }
 
@@ -77,8 +74,8 @@ public final class Director {
             .mapToInt(u -> (int)u.strength)
             .sum();
 
-        // Artillery if enemy clustered and we're losing significantly
         double ratio = (double) friendlyStrength / Math.max(1, enemyStrength);
+        Log.info("Director.maybeCallArtillery: ratio=" + String.format("%.2f", ratio) + " arty=" + s.enemyArtilleryFiresRemaining);
         if (ratio < 0.5 && s.enemyArtilleryFiresRemaining > 0) {
             double avgX = s.enemyUnits.stream()
                 .filter(u -> !u.destroyed)
@@ -100,6 +97,7 @@ public final class Director {
             ));
             s.enemyArtilleryFiresRemaining--;
             s.log("orders", "Director calls for artillery on enemy cluster.");
+            Log.info("Director.maybeCallArtillery: Artillery scheduled on (" + foeX + "," + foeY + ")");
         }
     }
 
