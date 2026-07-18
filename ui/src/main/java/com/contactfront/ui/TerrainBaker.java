@@ -2,8 +2,15 @@ package com.contactfront.ui;
 
 import com.contactfront.engine.model.GameState;
 import com.contactfront.engine.model.Terrain;
+import javafx.embed.swing.SwingFXUtils;
+import javafx.scene.image.Image;
 import javafx.scene.image.PixelWriter;
 import javafx.scene.image.WritableImage;
+
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 
 public final class TerrainBaker {
 

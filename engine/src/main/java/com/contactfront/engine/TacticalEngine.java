@@ -193,7 +193,6 @@ public final class TacticalEngine {
             Unit u = state.friendlyById(a.unitId());
             if (u == null || u.destroyed) return false;
             if (Movement.startMove(state, u, a.targetX(), a.targetY())) {
-                u.movementPoints = 0;
                 // Add to delayedOrders for ghost visualization
                 if (!immediate) {
                     state.delayedOrders.add(new DelayedOrder(a, (int) (state.elapsedMs / 1000) + 1, a.unitId()));

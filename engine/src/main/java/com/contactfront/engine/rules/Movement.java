@@ -6,12 +6,14 @@ import com.contactfront.engine.model.Unit;
 import com.contactfront.engine.model.UnitCategory;
 import com.contactfront.engine.model.Terrain;
 import com.contactfront.engine.model.MoveAction;
+import com.contactfront.engine.model.Stance;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public final class Movement {
     private Movement() {}
+    private static final long TICK_MS = 500;
 
     public static double pathCost(Tile[][] grid, int sx, int sy, int tx, int ty) {
         return pathCost(grid, sx, sy, tx, ty, UnitCategory.INFANTRY);
@@ -49,16 +51,28 @@ public final class Movement {
         return true;
     }
 
+    private static double ticksPerTile(Unit u) {
+        double baseTicks = switch (u.profile.category()) {
+            case ARMOR, LOGISTICS -> 2.0;
+            case RECON -> 1.5;
+            case INFANTRY -> 6.0;
+            case ENGINEER -> 7.0;
+            case AIR_DEFENSE, ARTILLERY -> 8.0;
+            default -> 6.0;
+        };
+        return baseTicks / (u.stance.moveMult > 0 ? u.stance.moveMult : 1.0);
+    }
+
     public static boolean startMove(GameState s, Unit u, int tx, int ty) {
         if (tx < 0 || ty < 0 || tx >= s.width() || ty >= s.height()) return false;
         if (tx == u.x && ty == u.y) return false;
-        double budget = u.effectiveMovementPoints() * u.stance.moveMult;
         double cost = pathCost(s.grid, u.x, u.y, tx, ty, u.profile.category());
-        if (cost == Double.POSITIVE_INFINITY || cost > budget) return false;
+        if (cost == Double.POSITIVE_INFINITY) return false;
 
         u.destX = tx;
         u.destY = ty;
-        u.stepsRemaining = Math.max(1, (int) Math.ceil(cost));
+        double totalTicks = Math.max(1, (double) cost * ticksPerTile(u));
+        u.stepsRemaining = (int) Math.ceil(totalTicks);
         return true;
     }
 
@@ -109,14 +123,14 @@ public final class Movement {
 
     public static List<int[]> reachable(GameState s, Unit u) {
         List<int[]> out = new ArrayList<>();
-        double budget = u.effectiveMovementPoints() * u.stance.moveMult;
+        int maxTiles = (int) (tilesPerSecond(u) * 60);
         for (int y = 0; y < s.height(); y++) {
             for (int x = 0; x < s.width(); x++) {
                 if (x == u.x && y == u.y) continue;
-                double c = pathCost(s.grid, u.x, u.y, x, y, u.profile.category());
-                if (c != Double.POSITIVE_INFINITY && c <= budget && !occupied(s, x, y, u)) {
-                    out.add(new int[]{x, y});
-                }
+                int dist = Math.abs(x - u.x) + Math.abs(y - u.y);
+                if (dist > maxTiles) continue;
+                if (s.grid[y][x].impassable()) continue;
+                out.add(new int[]{x, y});
             }
         }
         return out;

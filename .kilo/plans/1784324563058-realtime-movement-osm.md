@@ -81,9 +81,21 @@
 - Task 1-2: Unit destination tracking and gradual movement - DONE
 - Task 3-4: TacticalEngine tick integration and GameController clearSelection - DONE
 - Task 6: OSM logging - DONE
+- API Key validation button - DONE
+- API Key persistence to file - DONE
 
-## Risks & Edge Cases
-- Units on roads but moving across difficult terrain: should use destination terrain cost
-- Multiple units with same target tile: need collision handling during movement
-- Unit destroyed during movement: clear target and remove from queue
-- Selection persistence: ESC should cancel movement, not just clear selection
+## Final Changes
+- `OptionsDialog.java`: Added Validate button and API key persistence to `config/settings.dat`
+- `OverpassApiClient.java`: Added Log.info/error for API fetch attempts
+- `Unit.java`: Added `destX`, `destY`, `stepsRemaining` for gradual movement
+- `Movement.java`: Added `startMove()` and `tickMove()` for incremental movement
+- `TacticalEngine.java`: Added `processMovement()` in tick loop
+- `GameController.java`: Selection persists during movement, ESC cancels it
+
+## Final Status - COMPLETE
+- Units move gradually based on type: armor=2 ticks/tile, recon=1.5, infantry=6, engineer=7, air defense/artillery=8
+- Units can receive new orders anytime (no MP exhaustion in RTS mode)  
+- Selection persists during movement; ESC cancels destination
+- Google Maps API key validation and persistence added (Validate button, saved to config/settings.dat)
+- OSM logging added for fetch attempts
+- Exe built at `dist\Contact Front\Contact Front.exe`

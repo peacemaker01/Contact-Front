@@ -363,6 +363,19 @@ turn-based resolution (locked in Milestone 6) is unchanged.
 drag-select and right-click alone, previewed via ghosting, and only take
 effect on explicit turn commit.
 
+## Milestone 13 — SUPERSEDED, no longer applicable
+
+**Everything below (13a–13f) is kept only as a decision record — it is not
+a task list.** Confirmed direction: no 3D rendering at all. Flat 2D map
+with a map/satellite toggle, the same UI convention as Google/Apple Maps.
+LWJGL, mesh geometry, PBR materials, lighting/shadow computation, building
+extrusion, and LOD are all unnecessary — do not implement any of it.
+`TerrainMesh.java` and `PBRMaterial.java` are now dead code, same category
+as the earlier `SatelliteClassifier` removal. See "Milestone 13 (replacement)
+— 2D map with satellite toggle" below for what actually gets built.
+
+### Original text, superseded, kept for context only:
+
 ## Milestone 13 — Photorealistic terrain rendering (revised, expanded scope)
 
 **Supersedes the original Milestone 13.** Target quality bar: visually
@@ -456,13 +469,41 @@ and vegetation, at interactive frame rate, evaluated by side-by-side
 comparison against both the Milestone 3 baseline and real aerial imagery for
 general plausibility (not pixel-matching).
 
+### End of superseded 13a–13f content.
+
+## Milestone 13 (replacement) — 2D map with satellite toggle
+
+This is the actual task list. Flat 2D rendering throughout — no mesh, no
+lighting computation, no extrusion.
+
+- **Map view**: draw OSM-derived roads and building footprints as flat 2D
+  shapes (fills/outlines) using the same data `OsmSemanticGrid` already
+  parses for gameplay — one drawing pass over existing data, not a new
+  vector-tile styling system. Roads visible, standard vector-map
+  convention (DeepStateMap-style legibility).
+- **Satellite view**: MapTiler raster tiles drawn flat as the background
+  via GeoTools' `gt-wmts`. Roads stay invisible-but-present in the
+  underlying semantic data (imagery already shows them visually).
+- **Toggle control**: a simple map/satellite switch in the HUD, same
+  convention as Google/Apple Maps. Units, fog of war, and cover indicators
+  render identically on top of either background — only the background
+  layer swaps.
+- **Cleanup**: remove `TerrainMesh.java` and `PBRMaterial.java` (dead code,
+  same category as the earlier `SatelliteClassifier` removal). Confirm
+  LWJGL is not referenced anywhere in `ui/pom.xml` either (already
+  confirmed unused in `engine/pom.xml`) and remove entirely if so.
+
+**Acceptance:** a generated/real-location tactical map renders correctly in
+both map and satellite views, toggling between them is instant (no
+regeneration), and gameplay (movement cost, cover, LOS) is identical
+regardless of which view is active, since both read the same
+`OsmSemanticGrid` data underneath.
+
 ## Suggested task order for v1.1
 
-9 → 10 → 11 → 12, then 13 separately, in order 13a (decision) → 13b → 13c →
-13d → 13e → 13f. Milestone 13 is now substantially larger than 9–12 combined
-and depends on a technology decision (13a) being made before any of it
-starts — treat it as its own project phase, not a parallel task alongside
-9–12.
+9 → 10 → 11 → 12 → 13 (replacement version only — ignore 13a–13f).
+Milestone 13 is now comparable in size to 9–12 individually, not larger —
+the LWJGL/3D scope that made it a separate project phase no longer applies.
 
 ---
 
@@ -624,12 +665,84 @@ human-made features like roads and buildings from natural land cover, no
 matter the input quality, and a trained ML classifier would reintroduce the
 model-dependency problem excluded elsewhere in this document.
 
+## Satellite imagery provider — decided: MapTiler (free/cloud tier)
+
+Free/open sources were evaluated against the "Apple/Google Maps standard"
+quality bar and don't meet it for the *primary* imagery source:
+
+| Source | Resolution | Coverage | Verdict |
+|---|---|---|---|
+| Sentinel-2 (ESA Copernicus) | ~10m/px | Global | Too coarse for tactical zoom — a pixel exceeds most building footprints |
+| Landsat 8/9 (USGS/NASA) | ~15–30m/px | Global | Same problem, worse |
+| NAIP (USDA) | ~0.6–1m/px | **Continental US only** | Close to target resolution, but geographic coverage rules it out as the sole/primary source |
+
+No free source combines Apple/Google Maps-level detail with global
+coverage. Evaluated commercial options: Google Maps (original
+implementation), Mapbox Satellite, and **MapTiler** — genuinely strong
+imagery (up to 8cm/px aerial in US/Europe/Japan, 1–2m/px globally via a
+Maxar partnership).
+
+**Decided: MapTiler, free/cloud tier.** Important caveats that must not get
+lost:
+
+- **This is cloud-hosted, not self-hosted** — MapTiler's air-gapped/
+  on-premises self-hosting option (which would have solved the project's
+  standing offline-deployment goal) requires a custom/enterprise license,
+  not part of this decision. Live network dependency remains, same as
+  Google/Mapbox would have had.
+- **MapTiler's standard terms explicitly restrict government/military use**,
+  requiring a separate custom license — this is **not** resolved by using
+  the free tier, since the restriction is about use case, not pricing.
+  **Explicit intent, must be honored**: free tier is for development and
+  near-term shipping only. Revisit real licensing before this product is
+  pitched or sold as a military/government product. Do not let this become
+  a forgotten landmine the way the original Google Maps caching question
+  nearly did.
+- Same per-user API key distribution model already decided for Google Maps
+  applies unchanged.
+
+**Implementation**: replace `GoogleMapsClient` with an equivalent
+`MapTilerClient`. `OverpassApiClient`/`OsmSemanticGrid` (OSM data) are
+unaffected — no change, already correctly built as a separate, free, open
+source on their own merits, not dependent on which imagery provider is
+used. For elevation: MapTiler offers terrain/DEM data, but confirm whether
+it's included in the free/cloud tier or gated behind the same custom
+licensing as high-resolution imagery before switching `ElevationClient`
+over to it — keep SRTM/Copernicus DEM as the fallback if unconfirmed.
+
+**Frontend — revised, no WebView/JS dependency**: use **GeoTools** (LGPL,
+OSGeo Foundation, actively maintained) as the pure-Java data layer instead
+of embedding a JavaFX `WebView` with MapTiler's JS SDK. GeoTools' `gt-wmts`
+module fetches and composites MapTiler raster tiles natively via
+`Graphics2D`; JTS Topology Suite integration provides correct geometry
+types and coordinate reference system transforms for aligning OSM vector
+data with the tactical grid (a genuinely fiddly correctness problem worth
+using a mature library for rather than hand-rolling); GeoTools' raster/
+GridCoverage support can read GeoTIFF, giving a real implementation path
+for `ElevationClient` (SRTM/Copernicus DEM are typically distributed as
+GeoTIFF) instead of leaving it a placeholder. This keeps the entire
+application native Java, consistent with the original "one native Java
+application, no subprocess" goal from the start of the rewrite.
+
+**Important split to keep clear**: GeoTools is the *data* layer (fetch,
+parse, transform, align) — it is 2D/`Graphics2D`-based and does not do 3D
+terrain meshes or building extrusion. The 3D rendering itself is
+unchanged: still the custom LWJGL pipeline from Milestone 13a–13f, now fed
+by correctly-transformed data from GeoTools instead of ad-hoc parsing.
+GeoTools does not change MapTiler's own licensing terms on the imagery
+data — it's the fetching mechanism, not a license override; the
+government/military caveat above still applies to the data regardless of
+what fetches it.
+
+Sentinel-2/NAIP retain a secondary role: **offline development/testing
+fallback**, so the agent isn't burning paid API calls against a commercial
+provider during iteration.
+
 Instead, every scenario location uses three aligned real-world data sources
 over the same bounding box:
 
-- **Google Maps satellite imagery** — ground texture, the visual layer.
-  Stays exactly as central as originally intended; this section does not
-  reduce its role.
+- **Satellite imagery** (MapTiler, per decision above) — ground texture,
+  the visual layer.
 - **OpenStreetMap (via Overpass API)** — road paths and types, building
   footprints, land-use polygons. This is the semantic/gameplay-logic layer:
   rasterized onto the tactical map's grid resolution to produce movement

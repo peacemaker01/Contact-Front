@@ -15,8 +15,10 @@ import javafx.scene.control.Label;
 import javafx.scene.image.WritableImage;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.ScrollEvent;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
+import javafx.scene.shape.ArcType;
 import javafx.scene.text.TextAlignment;
 
 public class MapView {
@@ -28,9 +30,12 @@ public class MapView {
     private final Canvas canvas;
     private final StackPane stack;
     private final javafx.scene.control.ScrollPane scroll;
+    private final ToggleButton satelliteToggle;
 
     private WritableImage terrainImg;
+    private WritableImage satelliteImg;
     private GameState bakedState;
+    private boolean showSatellite = false;
 
     // drag-select state
     private int dragX0 = -1, dragY0 = -1, dragX1 = -1, dragY1 = -1;
@@ -46,8 +51,16 @@ public class MapView {
         this.tile = tileSize;
         this.onMapClick = onMapClick;
         this.canvas = new Canvas();
-        this.stack = new StackPane(canvas);
+        this.satelliteToggle = new ToggleButton("Satellite");
+        styleToggleButton(satelliteToggle);
+        satelliteToggle.setOnAction(e -> {
+            showSatellite = satelliteToggle.isSelected();
+            redraw();
+        });
+        this.stack = new StackPane(canvas, satelliteToggle);
         this.stack.setAlignment(javafx.geometry.Pos.TOP_LEFT);
+        StackPane.setAlignment(satelliteToggle, javafx.geometry.Pos.TOP_RIGHT);
+        StackPane.setMargin(satelliteToggle, new javafx.geometry.Insets(8));
         this.scroll = new javafx.scene.control.ScrollPane(stack);
         this.scroll.setStyle("-fx-background-color:#0e1117;");
         this.scroll.setPannable(false);
@@ -56,8 +69,23 @@ public class MapView {
         wireMouse();
     }
 
+    private void styleToggleButton(ToggleButton btn) {
+        btn.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-font-size:12px; -fx-pref-height:28px; -fx-border-color:#5a6e82;");
+        btn.selectedProperty().addListener((obs, old, selected) -> {
+            if (selected) {
+                btn.setStyle("-fx-background-color:#4fc3f7; -fx-text-fill:#000000; -fx-font-size:12px; -fx-pref-height:28px; -fx-border-color:#2c4258;");
+            } else {
+                btn.setStyle("-fx-background-color:#3a5067; -fx-text-fill:#e0e6ed; -fx-font-size:12px; -fx-pref-height:28px; -fx-border-color:#5a6e82;");
+            }
+        });
+    }
+
     public javafx.scene.control.ScrollPane scrollPane() { return scroll; }
     public double getZoom() { return zoom; }
+
+    public void setSatelliteImage(javafx.scene.image.Image img) {
+        this.satelliteImg = img != null ? TerrainBaker.toWritableImage(img) : null;
+    }
 
     public void setZoom(double z) {
         zoom = Math.max(0.5, Math.min(2.5, z));
@@ -176,13 +204,17 @@ public class MapView {
     public void redraw() {
         GameState s = ctrl.state;
         if (s == null || s.grid == null) return;
-        if (s != bakedState || terrainImg == null) {
-            terrainImg = s.elevation != null ? TerrainBaker.bake(s, tile) : null;
+        if (s.elevation != null && !showSatellite) {
+            terrainImg = TerrainBaker.bake(s, tile);
+            bakedState = s;
+        } else if (showSatellite) {
+            terrainImg = null;
             bakedState = s;
         }
         int w = s.width() * ts(), h = s.height() * ts();
         if ((int) canvas.getWidth() != w) canvas.setWidth(w);
         if ((int) canvas.getHeight() != h) canvas.setHeight(h);
+        satelliteToggle.setVisible(s.elevation != null || satelliteImg != null);
         draw(s);
     }
 
@@ -192,10 +224,16 @@ public class MapView {
         g.setFill(Palette.BACKGROUND);
         g.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
 
-        if (terrainImg != null) {
+        if (showSatellite && satelliteImg != null) {
+            g.drawImage(satelliteImg, 0, 0, canvas.getWidth(), canvas.getHeight());
+        } else if (terrainImg != null) {
             g.drawImage(terrainImg, 0, 0, canvas.getWidth(), canvas.getHeight());
         } else {
             flatTerrain(g, s, ts);
+        }
+
+        if (!showSatellite) {
+            drawOsmOverlays(g, s, ts);
         }
 
         if (s.smokeGrid != null) {
@@ -312,6 +350,59 @@ public class MapView {
                 g.fillRect(x * ts, y * ts, ts, ts);
             }
         }
+    }
+
+    private void drawOsmOverlays(GraphicsContext g, GameState s, int ts) {
+        drawRoads(g, s, ts);
+        drawBuildings(g, s, ts);
+    }
+
+    private void drawRoads(GraphicsContext g, GameState s, int ts) {
+        for (RoadSegment road : s.roadSegments) {
+            if (road.points() == null || road.points().size() < 2) continue;
+            int cx = -1, cy = -1;
+            for (double[] pt : road.points()) {
+                int gx = lonToGrid(s, pt[0]);
+                int gy = latToGrid(s, pt[1]);
+                if (cx >= 0 && gy >= 0 && gy < s.height()) {
+                    g.setStroke(Color.web("#3a3a3c", 0.9));
+                    g.setLineWidth(ts * 0.35);
+                    g.strokeLine(cx * ts + ts / 2, cy * ts + ts / 2, gx * ts + ts / 2, gy * ts + ts / 2);
+                }
+                cx = gx;
+                cy = gy;
+            }
+        }
+    }
+
+    private void drawBuildings(GraphicsContext g, GameState s, int ts) {
+        for (Building bldg : s.buildings) {
+            if (bldg.footprint == null) continue;
+            int[] xs = new int[bldg.footprint.size()];
+            int[] ys = new int[bldg.footprint.size()];
+            for (int i = 0; i < bldg.footprint.size(); i++) {
+                double[] pt = bldg.footprint.get(i);
+                xs[i] = lonToGrid(s, pt[0]) * ts;
+                ys[i] = latToGrid(s, pt[1]) * ts;
+            }
+            if (xs.length >= 3) {
+                g.setFill(Color.web("#4a4a4a", 0.85));
+                g.fillPolygon(xs, ys, xs.length);
+                g.setStroke(Color.web("#22211f", 0.9));
+                g.setLineWidth(1);
+                g.strokePolygon(xs, ys, xs.length);
+            }
+        }
+    }
+
+    private int lonToGrid(GameState s, double lon) {
+        double lonPerTile = 360.0 / s.width();
+        return (int) Math.round((lon - s.longitude + 180) / lonPerTile);
+    }
+
+    private int latToGrid(GameState s, double lat) {
+        double latPerTile = 180.0 / s.height();
+        return (int) Math.round((s.latitude - lat + 90) / latPerTile);
     }
 
     private void drawUnit(GraphicsContext g, Unit u, boolean enemy, GameState s, int ts) {
