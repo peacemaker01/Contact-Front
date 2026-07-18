@@ -42,11 +42,18 @@ Constraint: Prevents the engine from picking "dead" locations (empty ocean/deser
 
 Data Orchestrator:
 
-MapTilerClient: Fetches raster imagery for the selected bounding box.
+MapTilerClient: Fetches satellite raster using Static Maps API - returns single deterministic PNG for bounding box.
 
-OverpassApiClient: Parses OSM XML/JSON to generate the TacticalGrid (roads, buildings, vegetation).
+OverpassApiClient: Parses OSM JSON to generate TacticalGrid (roads, buildings, vegetation).
 
-GeoTools: Aligns the Raster image to the OSM Vector grid.
+GeoTools (future): Aligns Raster image to OSM Vector grid via CRS transforms.
+
+ElevationClient: Fetches GeoTIFF from OpenTopography API for real terrain elevation.
+
+Caching Strategy:
+- Satellite images cached by `static_{minLat}_{minLon}_{maxLat}_{maxLon}_{w}x{h}.png`
+- Elevation data cached by `dem_{minLat}_{minLon}_{maxLat}_{maxLon}.tif`
+- Ensures deterministic saves and avoids redundant API billing
 
 Deterministic Seed: The "Random Seed" for a New Game now selects a Location and Scenario Parameters. Re-running with the same seed pulls the same real-world data, ensuring perfect save-game stability.
 
@@ -64,7 +71,7 @@ M1: Engine Foundation: Build the headless, tick-based TickProcessor.
 
 M2: Registry & Data: Implement JSON schema loaders for factions/units/weapons.
 
-M3: Geo-Orchestration: Implement LocationRegistry and OSM/MapTiler integration via GeoTools.
+M3: Geo-Orchestration: Implement LocationRegistry, MapTiler Static API, Overpass API with vegetation support, and OpenTopography DEM integration.
 
 M4: Combat/Suppression: Implement Attrition Lookup Tables.
 

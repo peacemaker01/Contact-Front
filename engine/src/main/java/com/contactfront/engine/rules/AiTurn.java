@@ -1,7 +1,7 @@
 package com.contactfront.engine.rules;
 
 import com.contactfront.engine.model.*;
-import com.contactfront.engine.rules.*;
+import com.contactfront.ui.Log;
 
 import java.util.ArrayList;
 import java.util.List;

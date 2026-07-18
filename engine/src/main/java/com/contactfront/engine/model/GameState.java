@@ -44,6 +44,9 @@ public class GameState {
     public double[][] elevation;
     /** Normalized 0..1 moisture field (M13 baking). Null when not generated. */
     public double[][] moisture;
+    
+    /** Cached satellite image data for Static Maps API. */
+    public byte[] satelliteImageData;
 
     /** OSM-derived road segments for semantic grid overlay. */
     public final List<RoadSegment> roadSegments = new ArrayList<>();

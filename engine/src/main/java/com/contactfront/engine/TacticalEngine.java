@@ -2,6 +2,7 @@ package com.contactfront.engine;
 
 import com.contactfront.engine.model.*;
 import com.contactfront.engine.rules.*;
+import com.contactfront.ui.Log;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,6 +18,7 @@ public final class TacticalEngine {
     public TacticalEngine(GameState state, Random rng) {
         this.state = state;
         this.rng = rng;
+        Log.info("TacticalEngine: Created for game at " + state.latitude + "," + state.longitude);
     }
 
     public GameState state() {
@@ -24,15 +26,20 @@ public final class TacticalEngine {
     }
 
     public void start() {
+        Log.info("TacticalEngine: Starting turn - " + state.friendlyUnits.size() + " player units, " + state.enemyUnits.size() + " enemy units");
         for (Unit u : state.friendlyUnits) if (!u.destroyed) u.movementPoints = u.movement;
         for (Unit u : state.enemyUnits) if (!u.destroyed) u.movementPoints = u.movement;
         com.contactfront.engine.rules.Visibility.computePlayerVisibility(state);
     }
 
     public void tick() {
-        if (state.gameOver) return;
+        if (state.gameOver) {
+            Log.info("TacticalEngine: Tick skipped (game over)");
+            return;
+        }
         state.elapsedMs += TICK_MS;
         state.turn = (int) (state.elapsedMs / 1000);
+        Log.info("TacticalEngine: Tick " + state.turn + " at " + state.elapsedMs + "ms");
         processMovement(state);
         runAiTick();
         processDelayedOrders(state, rng);

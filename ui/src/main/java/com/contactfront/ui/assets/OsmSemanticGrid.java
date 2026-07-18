@@ -26,6 +26,15 @@ public final class OsmSemanticGrid {
             }
         }
     }
+    
+    public static void applyForests(GameState s, List<double[][]> forests) {
+        if (forests == null) return;
+        for (double[][] forest : forests) {
+            if (forest != null) {
+                fillPolygon(s, forest, Terrain.FOREST);
+            }
+        }
+    }
 
     private static void applyRoad(GameState s, RoadSegment road) {
         if (road.points() == null || road.points().size() < 2) return;
@@ -53,7 +62,7 @@ public final class OsmSemanticGrid {
         }
     }
     
-    private static int lonToGrid(GameState s, double lon) {
+private static int lonToGrid(GameState s, double lon) {
         double mercX = lonToWebMercatorX(lon);
         double centerMercX = lonToWebMercatorX(s.longitude);
         double mercPerTile = 2.0 * MERCATOR_MAX / (double) s.width();
@@ -72,10 +81,60 @@ public final class OsmSemanticGrid {
     private static double lonToWebMercatorX(double lon) {
         return EARTH_RADIUS * Math.toRadians(lon);
     }
-    
+
     private static double latToWebMercatorY(double lat) {
         double latRad = Math.toRadians(lat);
         return EARTH_RADIUS * Math.log(Math.tan(Math.PI / 4 + latRad / 2));
+    }
+
+    private static void fillPolygon(GameState s, double[][] points, Terrain type) {
+        if (points.length < 3) return;
+        
+        // Simple scanline fill for small polygons
+        int minY = s.height(), maxY = -1, minX = s.width(), maxX = -1;
+        int[] xs = new int[points.length];
+        int[] ys = new int[points.length];
+        
+        for (int i = 0; i < points.length; i++) {
+            xs[i] = lonToGrid(s, points[i][0]);
+            ys[i] = latToGrid(s, points[i][1]);
+            minX = Math.min(minX, xs[i]);
+            maxX = Math.max(maxX, xs[i]);
+            minY = Math.min(minY, ys[i]);
+            maxY = Math.max(maxY, ys[i]);
+        }
+        
+        // Bound to map
+        minX = Math.max(0, minX - 1);
+        maxX = Math.min(s.width() - 1, maxX + 1);
+        minY = Math.max(0, minY - 1);
+        maxY = Math.min(s.height() - 1, maxY + 1);
+        
+        // Simple point-in-polygon fill
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                if (pointInPolygon(x, y, xs, ys)) {
+                    Tile t = s.grid[y][x];
+                    if (t != null && t.type != Terrain.BUILDING) {
+                        t.type = type;
+                        t.movementCost = type == Terrain.FOREST ? 2.0 : t.movementCost;
+                        t.coverBonus = type == Terrain.FOREST ? 50 : t.coverBonus;
+                        t.blocksLos = type == Terrain.FOREST;
+                    }
+                }
+            }
+        }
+    }
+    
+    private static boolean pointInPolygon(int px, int py, int[] xs, int[] ys) {
+        boolean inside = false;
+        for (int i = 0, j = xs.length - 1; i < xs.length; j = i++) {
+            if (((ys[i] > py) != (ys[j] > py)) &&
+                (px < (xs[j] - xs[i]) * (py - ys[i]) / (ys[j] - ys[i] + 0.001) + xs[i])) {
+                inside = !inside;
+            }
+        }
+        return inside;
     }
 
     private static void drawLine(GameState s, double lon0, double lat0, double lon1, double lat1, Terrain type) {

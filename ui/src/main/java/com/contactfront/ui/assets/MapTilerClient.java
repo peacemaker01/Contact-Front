@@ -1,13 +1,15 @@
 package com.contactfront.ui.assets;
 
-import java.io.*;
+import com.contactfront.ui.Log;
+
+import java.io.IOException;
+import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Base64;
 import java.util.logging.Logger;
 
 public final class MapTilerClient {
@@ -15,17 +17,17 @@ public final class MapTilerClient {
     private static final HttpClient client = HttpClient.newHttpClient();
     private static String apiKey = "";
     private static Path cacheDir = Path.of("cache/maps");
-    private static final String TILE_URL_TEMPLATE = 
-        "https://api.maptiler.com/maps/satellite-v3/{z}/{x}/{y}.jpg?key=%s";
     
     private MapTilerClient() {}
     
     public static void setApiKey(String key) {
         apiKey = key != null ? key.trim() : "";
+        Log.info("MapTilerClient API key " + (apiKey.isEmpty() ? "cleared" : "configured"));
     }
     
     public static void setCacheDir(Path dir) {
         cacheDir = dir;
+        Log.info("MapTilerClient cache directory set: " + dir);
     }
     
     public static String getApiKey() {
@@ -33,11 +35,14 @@ public final class MapTilerClient {
     }
     
     public static boolean validateApiKey(String key) {
+        Log.info("MapTilerClient validating API key...");
         if (key == null || key.trim().isEmpty()) {
+            Log.error("MapTilerClient validation failed: key is empty");
             return false;
         }
         try {
-            String testUrl = "https://api.maptiler.com/maps/streets-v2/0/0/0.jpg?key=" + key.trim();
+            String testUrl = "https://api.maptiler.com/maps/streets-v2/static/0,0,1,1/1x1.png?key=" + key.trim();
+            Log.info("MapTilerClient requesting validation URL...");
             HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(testUrl))
                 .GET()
@@ -46,20 +51,29 @@ public final class MapTilerClient {
             HttpResponse<byte[]> resp = HttpClient.newHttpClient()
                 .send(req, HttpResponse.BodyHandlers.ofByteArray());
             int status = resp.statusCode();
-            LOGGER.fine("MapTiler validation status: " + status);
-            if (status == 200) return true;
-            if (status == 401) return false;
+            Log.info("MapTilerClient validation response: " + status);
+            if (status == 200) {
+                Log.info("MapTilerClient API key validation successful");
+                return true;
+            }
+            if (status == 401) {
+                Log.error("MapTilerClient validation failed: unauthorized (401)");
+                return false;
+            }
             if (status == 403) {
                 byte[] body = resp.body();
                 String responseBody = new String(body);
                 if (responseBody.contains("Invalid API key") || responseBody.contains("invalid")) {
+                    Log.error("MapTilerClient validation failed: invalid key (403)");
                     return false;
                 }
+                Log.info("MapTilerClient validation passed (403 but not invalid key - likely quota)");
                 return true;
             }
+            Log.warning("MapTilerClient validation returned status: " + status);
             return status < 400;
         } catch (Exception e) {
-            LOGGER.warning("MapTiler validation error: " + e.getMessage());
+            Log.error("MapTilerClient validation error: " + e.getMessage());
             return false;
         }
     }
@@ -68,102 +82,74 @@ public final class MapTilerClient {
         return cacheDir;
     }
     
-    public static record SatelliteImage(byte[] data, int width, int height, double latitude, double longitude) {}
+    public static record SatelliteImage(byte[] data, int width, int height) {}
     
-    public static SatelliteImage downloadSatelliteImage(double lat, double lon, int zoom, int size) 
+    public static SatelliteImage downloadSatelliteImage(double minLat, double minLon, double maxLat, double maxLon, int imageWidth, int imageHeight) 
             throws IOException, InterruptedException {
+        Log.info(String.format("MapTilerClient downloading satellite: bbox=%.4f,%.4f - %.4f,%.4f size=%dx%d", 
+            minLat, minLon, maxLat, maxLon, imageWidth, imageHeight));
         if (apiKey.isEmpty()) {
+            Log.error("MapTilerClient download failed: API key not configured");
             throw new IOException("MapTiler API key not configured");
         }
         
-        double[] tileCoords = latLonToTile(lat, lon, zoom);
-        int tileX = (int) tileCoords[0];
-        int tileY = (int) tileCoords[1];
-        int tileSize = 256;
+        String url = String.format(
+            "https://api.maptiler.com/maps/satellite/static/%.6f,%.6f,%.6f,%.6f/%dx%d.png?key=%s",
+            minLon, minLat, maxLon, maxLat, imageWidth, imageHeight, apiKey
+        );
         
-        String url = String.format(TILE_URL_TEMPLATE, apiKey).replace("{z}", String.valueOf(zoom))
-                .replace("{x}", String.valueOf(tileX)).replace("{y}", String.valueOf(tileY));
-        
+        Log.info("MapTilerClient requesting: " + url.replace(apiKey, "***"));
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(url))
             .GET()
-            .header("Accept", "image/jpeg")
+            .header("Accept", "image/png")
             .build();
         
         HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
         
         if (response.statusCode() != 200) {
-            throw new IOException("MapTiler API error: " + response.statusCode());
+            Log.error("MapTiler Static API error: " + response.statusCode());
+            throw new IOException("MapTiler Static API error: " + response.statusCode());
         }
         
-        byte[] imageData = response.body();
-        double[] bounds = tileBounds(lon, lat, zoom);
-        
-        return new SatelliteImage(imageData, tileSize, tileSize, lat, lon);
+        Log.info("MapTilerClient download complete: " + response.body().length + " bytes");
+        return new SatelliteImage(response.body(), imageWidth, imageHeight);
     }
     
-    public static Path cacheImage(double lat, double lon, int zoom, int size) throws IOException, InterruptedException {
-        String cacheKey = String.format("satellite_%.4f_%.4f_z%d_%d.jpg", lat, lon, zoom, size);
+    public static SatelliteImage fetchCachedSatelliteImage(double minLat, double minLon, double maxLat, double maxLon, int imageWidth, int imageHeight) 
+            throws IOException, InterruptedException {
+        String cacheKey = String.format("static_%.4f_%.4f_%.4f_%.4f_%dx%d.png", 
+            minLat, minLon, maxLat, maxLon, imageWidth, imageHeight);
         Path cacheFile = cacheDir.resolve(cacheKey);
         
         if (Files.exists(cacheFile) && Files.size(cacheFile) > 1000) {
-            return cacheFile;
+            Log.info("MapTilerClient cache hit: " + cacheKey + " (" + Files.size(cacheFile) + " bytes)");
+            byte[] cached = Files.readAllBytes(cacheFile);
+            return new SatelliteImage(cached, imageWidth, imageHeight);
         }
         
+        Log.info("MapTilerClient cache miss, fetching fresh image...");
         Files.createDirectories(cacheDir);
-        SatelliteImage image = downloadSatelliteImage(lat, lon, zoom, size);
+        SatelliteImage image = downloadSatelliteImage(minLat, minLon, maxLat, maxLon, imageWidth, imageHeight);
         
         try (OutputStream out = Files.newOutputStream(cacheFile)) {
             out.write(image.data);
+            Log.info("MapTilerClient cached image to: " + cacheFile);
         }
         
-        return cacheFile;
+        return image;
     }
     
-    public static boolean hasCachedImage(double lat, double lon, int zoom, int size) {
-        String cacheKey = String.format("satellite_%.4f_%.4f_z%d_%d.jpg", lat, lon, zoom, size);
+    public static boolean hasCachedSatellite(double minLat, double minLon, double maxLat, double maxLon, int imageWidth, int imageHeight) {
+        String cacheKey = String.format("static_%.4f_%.4f_%.4f_%.4f_%dx%d.png", 
+            minLat, minLon, maxLat, maxLon, imageWidth, imageHeight);
         Path cacheFile = cacheDir.resolve(cacheKey);
-        return Files.exists(cacheFile);
-    }
-    
-    public static double[] latLonToTile(double lat, double lon, int zoom) {
-        double sinLat = Math.sin(Math.toRadians(lat));
-        int x = (int) ((lon + 180) / 360 * (1 << zoom));
-        int y = (int) ((1 - (Math.log(Math.tan(Math.PI / 4 + Math.toRadians(lat)) + sinLat) / Math.PI)) / 2 * (1 << zoom));
-        return new double[]{x, y};
-    }
-    
-    public static double[] tileBounds(double centerLon, double centerLat, int zoom) {
-        double[] tile = latLonToTile(centerLat, centerLon, zoom);
-        int x = (int) tile[0];
-        int y = (int) tile[1];
-        
-        double n = 1 << zoom;
-        double lonDeg0 = x / n * 360 - 180;
-        double lonDeg1 = (x + 1) / n * 360 - 180;
-        double latRad0 = 2 * Math.atan(Math.exp(Math.PI * (1 - 2 * y / n))) - Math.PI / 2;
-        double latRad1 = 2 * Math.atan(Math.exp(Math.PI * (1 - 2 * (y + 1) / n))) - Math.PI / 2;
-        
-        return new double[]{lonDeg0, Math.toDegrees(latRad1), lonDeg1, Math.toDegrees(latRad0)};
-    }
-    
-    public static double[][] fetchTileMatrix(double lat, double lon, int zoom, int width, int height) {
-        double[] tile = latLonToTile(lat, lon, zoom);
-        int tileX = (int) tile[0];
-        int tileY = (int) tile[1];
-        
-        double[][] result = new double[height][width];
-        double[] bounds = tileBounds(lon, lat, zoom);
-        
-        double lonStep = (bounds[2] - bounds[0]) / width;
-        double latStep = (bounds[3] - bounds[1]) / height;
-        
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                result[y][x] = Math.sqrt(x * x + y * y);
-            }
+        try {
+            boolean has = Files.exists(cacheFile) && Files.size(cacheFile) > 1000;
+            Log.info("MapTilerClient hasCached check: " + cacheKey + " = " + has);
+            return has;
+        } catch (IOException e) {
+            return false;
         }
-        
-        return result;
     }
 }
