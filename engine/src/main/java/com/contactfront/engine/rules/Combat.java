@@ -21,6 +21,11 @@ public final class Combat {
     public static FireResult resolveFire(GameState s, Unit attacker, Unit target, Random rng, boolean air) {
         if (target == null || target.destroyed) return new FireResult(false, false, 0, null);
         int dist = Math.abs(attacker.x - target.x) + Math.abs(attacker.y - target.y);
+
+        // JTS intersection hook: when GameState has projected geometries and a SpatialIndex,
+        // verify line-of-sight / road trafficability here before resolving fire.
+        // Example: if (!s.hasSpatialIndex() || spatialIndex.intersectsLine(attacker, target)) { ... }
+
         Weapon weapon = attacker.bestWeaponVs(target, air);
         if (weapon == null) {
             s.log("combat", attacker.profile.name() + " has no usable weapon vs " + target.profile.name() + ".");

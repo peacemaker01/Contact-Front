@@ -20,6 +20,10 @@ public class GameState {
     public double latitude = 35.0;
     public double longitude = -120.0;
     public String locationName = "Generated Location";
+    public double minLat;
+    public double maxLat;
+    public double minLon;
+    public double maxLon;
 
     public Tile[][] grid;
     public Visibility[][] visibility;
@@ -92,6 +96,10 @@ public class GameState {
     public Boolean victory = null;
 
     public long seed = 0;
+
+    public boolean hasValidGeoBounds() {
+        return latitude != 0 || longitude != 0 || locationName != null && !locationName.equals("Generated Location");
+    }
 
     public int width() {
         return grid == null || grid.length == 0 ? 0 : grid[0].length;

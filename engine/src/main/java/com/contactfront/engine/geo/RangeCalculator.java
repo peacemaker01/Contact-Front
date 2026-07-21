@@ -8,6 +8,10 @@ import org.locationtech.jts.geom.Coordinate;
 public final class RangeCalculator {
     private RangeCalculator() {}
 
+    static {
+        System.setProperty("org.geotools.referencing.forceXY", "true");
+    }
+
     private static volatile CoordinateReferenceSystem WGS84_CRS;
     private static volatile boolean initialized;
 

@@ -568,6 +568,15 @@ if (u.profile.category() == UnitCategory.ARMOR) {
     private static Unit closestVisibleFriendly(GameState s, Unit from) {
         Unit best = null;
         int min = Integer.MAX_VALUE;
+
+        // SpatialIndex hook: when GameState has a built STRtree index, query it
+        // for enemies within recon radius instead of scanning all enemy units.
+        // Example:
+        // if (s.hasSpatialIndex()) {
+        //     var candidates = s.spatialIndex().query(enemyEnvelope);
+        //     // filter by visibility and distance
+        // }
+
         for (Unit f : s.friendlyUnits) {
             if (f.destroyed) continue;
             if (!Visibility.enemySees(s, from, f)) continue;

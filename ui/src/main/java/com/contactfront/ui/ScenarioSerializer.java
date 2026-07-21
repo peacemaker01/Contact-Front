@@ -21,6 +21,13 @@ public final class ScenarioSerializer {
         metadata.put("description", "Scenario exported from Contact Front");
         metadata.put("playerFaction", s.playerFaction != null ? s.playerFaction.name() : "USA");
         metadata.put("enemyFaction", s.enemyFaction != null ? s.enemyFaction.name() : "RUSSIA");
+        metadata.put("locationName", s.locationName != null ? s.locationName : "");
+        metadata.put("latitude", s.latitude);
+        metadata.put("longitude", s.longitude);
+        metadata.put("minLat", s.minLat);
+        metadata.put("maxLat", s.maxLat);
+        metadata.put("minLon", s.minLon);
+        metadata.put("maxLon", s.maxLon);
         root.put("scenario_metadata", metadata);
 
         JSONObject environment = new JSONObject();
@@ -83,6 +90,18 @@ public final class ScenarioSerializer {
             }
         }
         root.put("triggers", triggers);
+
+        JSONArray objectives = new JSONArray();
+        for (Objective o : s.objectives) {
+            JSONObject oj = new JSONObject();
+            oj.put("id", o.id);
+            oj.put("name", o.name);
+            oj.put("x", o.x);
+            oj.put("y", o.y);
+            oj.put("type", o.type);
+            objectives.put(oj);
+        }
+        root.put("objectives", objectives);
 
         try (FileWriter fw = new FileWriter(file)) {
             fw.write(root.toString(2));

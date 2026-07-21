@@ -9,15 +9,18 @@ import com.contactfront.ui.controller.GameController;
 import com.contactfront.ui.Log;
 import com.contactfront.ui.Palette;
 import com.contactfront.ui.TerrainBaker;
-import javafx.geometry.Bounds;
-import javafx.geometry.Insets;
-import javafx.geometry.Pos;
+import com.contactfront.ui.assets.TileFetcher;
+import com.contactfront.ui.assets.TileStitcher;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Label;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.image.Image;
 import javafx.scene.image.WritableImage;
+import javafx.geometry.Bounds;
+import javafx.embed.swing.SwingFXUtils;
+import java.awt.image.BufferedImage;
+import java.awt.image.BufferedImage;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.HBox;
@@ -38,8 +41,10 @@ public class MapView {
 
     private WritableImage terrainImg;
     private WritableImage satelliteImg;
+    private BufferedImage tileBackground;
     private GameState bakedState;
     private boolean showSatellite = false;
+    private int tileZoom = 14;
 
     // drag-select state
     private int dragX0 = -1, dragY0 = -1, dragX1 = -1, dragY1 = -1;
@@ -217,6 +222,7 @@ public class MapView {
         } else if (showSatellite) {
             terrainImg = null;
             bakedState = s;
+            updateTileBackgroundAsync(s);
         }
         int w = s.width() * ts(), h = s.height() * ts();
         if ((int) canvas.getWidth() != w) canvas.setWidth(w);
@@ -225,13 +231,45 @@ public class MapView {
         draw(s);
     }
 
+    private void updateTileBackgroundAsync(GameState s) {
+        if (s.latitude == 0 && s.longitude == 0 && s.locationName.equals("Generated Location")) return;
+        new Thread(() -> {
+            try {
+                int zoom = tileZoom;
+                double n = Math.pow(2.0, zoom);
+                double centerMercX = 6378137 * Math.toRadians(s.longitude);
+                double centerMercY = 6378137 * Math.log(Math.tan(Math.PI / 4 + Math.toRadians(s.latitude) / 2));
+                double gridWidthMerc = s.width() * (2.0 * 20037508.34 / s.width());
+                double gridHeightMerc = s.height() * (2.0 * 20037508.34 / s.height());
+                int minTileX = (int) Math.floor(((centerMercX - gridWidthMerc / 2) / 40075016.68 + 1) * n / 2);
+                int maxTileX = (int) Math.ceil(((centerMercX + gridWidthMerc / 2) / 40075016.68 + 1) * n / 2);
+                int minTileY = (int) Math.floor((1 - (centerMercY + gridHeightMerc / 2) / Math.PI / 20037508.34) * n / 2);
+                int maxTileY = (int) Math.ceil((1 - (centerMercY - gridHeightMerc / 2) / Math.PI / 20037508.34) * n / 2);
+                minTileX = Math.max(0, minTileX);
+                minTileY = Math.max(0, minTileY);
+                maxTileX = Math.min((int) n - 1, maxTileX);
+                maxTileY = Math.min((int) n - 1, maxTileY);
+                if (maxTileX < minTileX || maxTileY < minTileY) return;
+                BufferedImage stitched = TileStitcher.stitchTiles(zoom, minTileX, minTileY, maxTileX, maxTileY, 256);
+                if (stitched != null) {
+                    tileBackground = stitched;
+                    javafx.application.Platform.runLater(this::redraw);
+                }
+            } catch (Exception e) {
+                Log.warning("MapView: tile background update failed: " + e.getMessage());
+            }
+        }, "tile-fetcher").start();
+    }
+
     private void draw(GameState s) {
         GraphicsContext g = canvas.getGraphicsContext2D();
         int ts = ts();
         g.setFill(Palette.BACKGROUND);
         g.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
 
-        if (showSatellite && satelliteImg != null) {
+        if (showSatellite && tileBackground != null) {
+            g.drawImage(javafx.embed.swing.SwingFXUtils.toFXImage(tileBackground, null), 0, 0, canvas.getWidth(), canvas.getHeight());
+        } else if (showSatellite && satelliteImg != null) {
             g.drawImage(satelliteImg, 0, 0, canvas.getWidth(), canvas.getHeight());
         } else if (terrainImg != null) {
             g.drawImage(terrainImg, 0, 0, canvas.getWidth(), canvas.getHeight());

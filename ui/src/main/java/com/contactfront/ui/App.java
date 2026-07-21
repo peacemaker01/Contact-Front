@@ -257,6 +257,10 @@ private void launchGame(SetupData data) {
             GameState state = new GameState();
             state.latitude = bbox.centerLat();
             state.longitude = bbox.centerLon();
+            state.minLat = bbox.minLat();
+            state.maxLat = bbox.maxLat();
+            state.minLon = bbox.minLon();
+            state.maxLon = bbox.maxLon();
             state.locationName = result.location().name();
             state.satelliteImageData = satImg.data();
             state.playerFaction = playerFaction;
@@ -643,6 +647,7 @@ private void launchGame(SetupData data) {
     }
 
     public static void main(String[] args) {
+        System.setProperty("org.geotools.referencing.forceXY", "true");
         launch(args);
     }
 }

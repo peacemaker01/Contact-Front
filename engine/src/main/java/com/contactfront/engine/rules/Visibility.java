@@ -88,6 +88,16 @@ public final class Visibility {
     public static boolean enemySees(GameState s, Unit enemy, Unit friendly) {
         if (friendly.destroyed) return false;
         if (chebyshev(enemy.x, enemy.y, friendly.x, friendly.y) > enemy.reconRadius) return false;
+
+        // JTS orthodromic hook: when GameState has valid lat/lon bounds, use
+        // RangeCalculator.orthodromicDistance(...) for long-range LOS checks
+        // instead of grid Chebyshev, so geography-scale distances are accurate.
+        // Example:
+        // if (s.hasValidGeoBounds()) {
+        //     double meters = RangeCalculator.orthodromicDistance(...);
+        //     if (meters > maxMeters) return false;
+        // }
+
         if (!LineOfSight.hasLineOfSight(enemy.x, enemy.y, friendly.x, friendly.y, s)) return false;
         if (friendly.sensorEmission == com.contactfront.engine.model.SensorEmission.Active_RF && s.ewCommsJammed) {
             int dist = manhattan(enemy.x, enemy.y, friendly.x, friendly.y);
