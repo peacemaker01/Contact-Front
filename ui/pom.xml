@@ -30,10 +30,21 @@
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-graphics</artifactId>
         </dependency>
-            <dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-swing</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.json</groupId>
             <artifactId>json</artifactId>
             <version>20240303</version>
+        </dependency>
+        <dependency>
+            <groupId>mil-sym-java</groupId>
+            <artifactId>mil-sym-java</artifactId>
+            <version>2.8.2</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/../mil-sym-java-2.8.2.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>org.geotools</groupId>
@@ -83,10 +94,11 @@
                         <goals>
                             <goal>copy-dependencies</goal>
                         </goals>
-                        <configuration>
-                            <outputDirectory>${project.build.directory}/lib</outputDirectory>
-                            <includeScope>runtime</includeScope>
-                        </configuration>
+<configuration>
+                             <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                             <includeScope>runtime</includeScope>
+                             <includeSystemScope>true</includeSystemScope>
+                         </configuration>
                     </execution>
                 </executions>
             </plugin>

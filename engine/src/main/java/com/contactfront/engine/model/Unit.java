@@ -46,6 +46,17 @@ public final class Unit {
     public boolean engageOnlyAtOptimalRange = false;
     public boolean engageAtAnyRange = false;
 
+    // Modular doctrinal components
+    public NetworkTopology networkTopology = NetworkTopology.Type_A;
+    public SensorEmission sensorEmission = SensorEmission.Active_RF;
+    public DamageModel damageModel = DamageModel.Bustle_Protected;
+    public DroneInterface droneInterface = DroneInterface.Direct_PiP;
+    public double networkShieldMultiplier = 1.0;
+
+    // Drone state fields (for loitering munitions)
+    public boolean isJammed = false;
+    public double insDriftAccumulated = 0.0;
+
     public int orderDelayTurns = 0;
     public int turnsSuppressed = 0;
     public boolean underFireThisTurn = false;
@@ -62,6 +73,13 @@ public final class Unit {
 
     public boolean wasSuppressed = false;
 
+    // Weapon facing for threat evaluation
+    public double weaponFacingX = 1.0;
+    public double weaponFacingY = 0.0;
+
+    // SIDC for scenario builder
+    public String sidcCode;
+
     public Unit(int id, Faction faction, UnitProfile profile, int x, int y, Profiles roster) {
         this.id = id;
         this.faction = faction;
@@ -75,6 +93,12 @@ public final class Unit {
         this.reconRadius = profile.reconRadius();
         this.radioRange = profile.radioRange();
         this.baseAccuracy = profile.baseAccuracy();
+        FactionBlueprint bp = com.contactfront.engine.data.FactionRegistry.getBlueprint(faction);
+        this.networkTopology = bp.networkTopology();
+        this.sensorEmission = bp.sensorEmission();
+        this.damageModel = bp.damageModel();
+        this.droneInterface = bp.droneInterface();
+        this.networkShieldMultiplier = bp.networkShieldMultiplier();
     }
 
     public UnitCategory category() {

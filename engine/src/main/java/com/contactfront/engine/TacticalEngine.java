@@ -39,6 +39,19 @@ public final class TacticalEngine {
         state.elapsedMs += TICK_MS;
         state.turn = (int) (state.elapsedMs / 1000);
         Log.info("TacticalEngine: Tick " + state.turn + " at " + state.elapsedMs + "ms");
+        
+        // Regenerate movement points in real-time (1 point per tick)
+        for (Unit u : state.friendlyUnits) {
+            if (!u.destroyed && !u.routed) {
+                u.movementPoints = Math.min(u.movement, u.movementPoints + 1);
+            }
+        }
+        for (Unit u : state.enemyUnits) {
+            if (!u.destroyed && !u.routed) {
+                u.movementPoints = Math.min(u.movement, u.movementPoints + 1);
+            }
+        }
+        
         processMovement(state);
         runAiTick();
         processDelayedOrders(state, rng);

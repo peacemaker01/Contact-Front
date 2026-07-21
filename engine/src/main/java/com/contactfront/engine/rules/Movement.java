@@ -8,6 +8,7 @@ import com.contactfront.engine.model.UnitCategory;
 import com.contactfront.engine.model.Terrain;
 import com.contactfront.engine.model.MoveAction;
 import com.contactfront.engine.model.Stance;
+import com.contactfront.engine.model.RoadSegment.RoadType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,12 +30,21 @@ public final class Movement {
             int iy = (int) Math.round(sy + (ty - sy) * (i / (double) steps));
             Tile t = grid[iy][ix];
             if (t.impassableForGround()) return Double.POSITIVE_INFINITY;
+            double tileCost = tileMovementCost(t, category);
             if (category == UnitCategory.DRONE || category == UnitCategory.RECON) {
                 if (t.type == Terrain.WATER) continue;
             }
-            cost += t.movementCost;
+            cost += tileCost;
         }
         return cost;
+    }
+
+    private static double tileMovementCost(Tile t, UnitCategory category) {
+        if (t.type == Terrain.ROAD || t.type == Terrain.ROAD_VERT || t.type == Terrain.ROAD_CROSS) {
+            RoadType roadType = t.roadType != null ? t.roadType : RoadType.UNCLASSIFIED;
+            return 1.0 / Terrain.roadSpeedMultiplier(roadType, category);
+        }
+        return t.movementCost;
     }
 
     public static boolean applyMove(GameState s, Unit u, int tx, int ty) {

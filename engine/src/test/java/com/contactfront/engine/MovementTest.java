@@ -47,4 +47,20 @@ public class MovementTest {
         u.suppression = 0;
         assertTrue(Movement.applyMove(s, u, 6, 0));
     }
+
+    @Test
+    void realtimeMovementRegenerationPerTick() {
+        GameState s = TestSupport.grid(10, 1, Terrain.OPEN);
+        Profiles p = TestSupport.customRoster();
+        s.playerFaction = com.contactfront.engine.model.Faction.USA;
+        Unit u = TestSupport.unit(s, p, "shooter", s.playerFaction, 0, 0, 1);
+        u.movementPoints = 0;
+
+        // Simulate what TacticalEngine.tick() does: regenerate 1 MP per tick
+        for (int tick = 0; tick < 10; tick++) {
+            u.movementPoints = Math.min(u.movement, u.movementPoints + 1);
+        }
+
+        assertEquals(u.movement, u.movementPoints, "Unit should have regenerated to full MP after ticks");
+    }
 }

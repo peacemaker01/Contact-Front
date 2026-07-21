@@ -1,0 +1,7 @@
+{
+  "network_topology": "Decentralized",
+  "sensor_emission": "Passive EO/IR",
+  "damage_model": "Hull Carousel",
+  "drone_interface": "Waypoint Saturation",
+  "network_shield_multiplier": 1.5
+}

@@ -33,10 +33,15 @@
 - Terrain.ROAD_VERT reference exists but roads are all horizontal from `OsmSemanticGrid`
 - GeoOrchestrator requires gt-epsg-hsql for CRS initialization (stub in place)
 
-### Policy
-- All new games require MapTiler API key configured in Options
-- Locations selected from curated pool via LocationRegistry (seed determines location)
-- No procedural terrain fallback - always uses real OSM/MapTiler data
+### Logging
+All execution flow logged to `logs/contactfront.log` with timestamps:
+- UI layer: MapTilerClient, OverpassApiClient, SatelliteImageProcessor, MapView, App lifecycle
+- Engine layer: TacticalEngine ticks, Movement, AiTurn, Director decisions, Artillery, Objectives, Visibility
+- Errors include stack traces and response bodies where applicable
+
+## Critical Context
+- **MapTiler API key required** - No procedural fallback in new game flow
+- 403 errors indicate invalid key or quota exceeded on MapTiler free tier
 
 ## Milestone 13 (Geo-Orchestration) — Real-World Tactical Maps
 - MapTiler Static Maps API integrated for satellite imagery

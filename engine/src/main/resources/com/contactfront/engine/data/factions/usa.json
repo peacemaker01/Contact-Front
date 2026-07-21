@@ -1,0 +1,7 @@
+{
+  "network_topology": "Centralized",
+  "sensor_emission": "Active RF",
+  "damage_model": "Bustle Protected",
+  "drone_interface": "Direct PiP",
+  "network_shield_multiplier": 1.0
+}

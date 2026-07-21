@@ -35,7 +35,6 @@ public final class MapTilerClient {
     }
     
     public static boolean validateApiKey(String key) {
-        Log.info("MapTilerClient validating API key...");
         if (key == null || key.trim().isEmpty()) {
             Log.error("MapTilerClient validation failed: key is empty");
             return false;
@@ -63,11 +62,11 @@ public final class MapTilerClient {
             if (status == 403) {
                 byte[] body = resp.body();
                 String responseBody = new String(body);
-                if (responseBody.contains("Invalid API key") || responseBody.contains("invalid")) {
+                if (responseBody.contains("Invalid API key") || responseBody.contains("\"error\"") && responseBody.contains("invalid")) {
                     Log.error("MapTilerClient validation failed: invalid key (403)");
                     return false;
                 }
-                Log.info("MapTilerClient validation passed (403 but not invalid key - likely quota)");
+                Log.info("MapTilerClient validation passed (403 but likely quota exceeded for free tier)");
                 return true;
             }
             Log.warning("MapTilerClient validation returned status: " + status);
@@ -108,7 +107,8 @@ public final class MapTilerClient {
         HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
         
         if (response.statusCode() != 200) {
-            Log.error("MapTiler Static API error: " + response.statusCode());
+            String body = response.body().length > 500 ? new String(response.body(), 0, 500) : new String(response.body());
+            Log.error("MapTiler Static API error " + response.statusCode() + ": " + body);
             throw new IOException("MapTiler Static API error: " + response.statusCode());
         }
         
@@ -118,6 +118,10 @@ public final class MapTilerClient {
     
     public static SatelliteImage fetchCachedSatelliteImage(double minLat, double minLon, double maxLat, double maxLon, int imageWidth, int imageHeight) 
             throws IOException, InterruptedException {
+        if (apiKey.isEmpty()) {
+            Log.info("MapTilerClient: No API key - skipping satellite fetch");
+            return null;
+        }
         String cacheKey = String.format("static_%.4f_%.4f_%.4f_%.4f_%dx%d.png", 
             minLat, minLon, maxLat, maxLon, imageWidth, imageHeight);
         Path cacheFile = cacheDir.resolve(cacheKey);

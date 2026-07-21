@@ -3,6 +3,7 @@ package com.contactfront.engine;
 import com.contactfront.engine.data.Profiles;
 import com.contactfront.engine.model.*;
 import com.contactfront.engine.rules.AiTurn;
+import com.contactfront.engine.rules.Movement;
 import com.contactfront.engine.rules.Visibility;
 import org.junit.jupiter.api.Test;
 
@@ -68,5 +69,43 @@ public class FogOfWarTest {
         assertTrue(Visibility.enemySees(s, enemy, friendly));
         s.addSmoke(2, 0, 3);
         assertFalse(Visibility.enemySees(s, enemy, friendly));
+    }
+
+    @Test
+    void wetlandIsImpassable() {
+        GameState s = TestSupport.grid(5, 1, Terrain.OPEN);
+        s.playerFaction = Faction.USA;
+        s.enemyFaction = Faction.RUSSIA;
+        Profiles p = TestSupport.customRoster();
+        Unit infantry = TestSupport.unit(s, p, "grunt", Faction.USA, 0, 0, 1);
+        TestSupport.setTerrain(s, 2, 0, Terrain.WETLAND);
+        s.grid[0][2].movementCost = 999.0;
+        double cost = Movement.pathCost(s.grid, 0, 0, 4, 0, UnitCategory.INFANTRY);
+        assertTrue(Double.isInfinite(cost) || cost >= 999.0, "Wetland should be impassable");
+    }
+
+    @Test
+    void fordIsPassable() {
+        GameState s = TestSupport.grid(5, 1, Terrain.OPEN);
+        s.playerFaction = Faction.USA;
+        s.enemyFaction = Faction.RUSSIA;
+        Profiles p = TestSupport.customRoster();
+        Unit infantry = TestSupport.unit(s, p, "grunt", Faction.USA, 0, 0, 1);
+        TestSupport.setTerrain(s, 2, 0, Terrain.FORD);
+        double cost = Movement.pathCost(s.grid, 0, 0, 4, 0, UnitCategory.INFANTRY);
+        assertTrue(cost < 10.0, "Ford should be passable");
+    }
+
+    @Test
+    void waterwayIsImpassable() {
+        GameState s = TestSupport.grid(5, 1, Terrain.OPEN);
+        s.playerFaction = Faction.USA;
+        s.enemyFaction = Faction.RUSSIA;
+        Profiles p = TestSupport.customRoster();
+        Unit infantry = TestSupport.unit(s, p, "grunt", Faction.USA, 0, 0, 1);
+        TestSupport.setTerrain(s, 2, 0, Terrain.WATERWAY);
+        s.grid[0][2].movementCost = 999.0;
+        double cost = Movement.pathCost(s.grid, 0, 0, 4, 0, UnitCategory.INFANTRY);
+        assertTrue(Double.isInfinite(cost) || cost >= 999.0, "Waterway should be impassable");
     }
 }

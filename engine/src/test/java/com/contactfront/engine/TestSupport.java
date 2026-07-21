@@ -31,9 +31,9 @@ public final class TestSupport {
         p.add(new com.contactfront.engine.model.WeaponProfile("wpn_light", "L", 12, DamageClass.LIGHT, 1, 2, 20, java.util.Set.of(TargetType.GROUND)));
         p.add(new com.contactfront.engine.model.WeaponProfile("wpn_at", "AT", 12, DamageClass.AT, 1, 2, 20, java.util.Set.of(TargetType.GROUND)));
         p.add(new com.contactfront.engine.model.WeaponProfile("wpn_heavy", "H", 12, DamageClass.HEAVY, 1, 4, 20, java.util.Set.of(TargetType.GROUND)));
-        p.add(new UnitProfile("shooter", "S", UnitCategory.INFANTRY, java.util.List.of("wpn_light", "wpn_at", "wpn_heavy"), 3, ArmorClass.NONE, 4, 200, 10, java.util.List.of()));
-        p.add(new UnitProfile("tank", "T", UnitCategory.ARMOR, java.util.List.of("wpn_heavy"), 5, ArmorClass.HEAVY, 4, 50, 10, java.util.List.of()));
-        p.add(new UnitProfile("grunt", "G", UnitCategory.INFANTRY, java.util.List.of("wpn_light"), 3, ArmorClass.NONE, 4, 75, 10, java.util.List.of()));
+        p.add(new UnitProfile("shooter", "S", UnitCategory.INFANTRY, java.util.List.of("wpn_light", "wpn_at", "wpn_heavy"), 3, ArmorClass.NONE, 4, 200, 10, java.util.List.of(), 1.0, 0.5, 0, false));
+        p.add(new UnitProfile("tank", "T", UnitCategory.ARMOR, java.util.List.of("wpn_heavy"), 5, ArmorClass.HEAVY, 4, 50, 10, java.util.List.of(), 30.0, 0.7, 300, true));
+        p.add(new UnitProfile("grunt", "G", UnitCategory.INFANTRY, java.util.List.of("wpn_light"), 3, ArmorClass.NONE, 4, 75, 10, java.util.List.of(), 1.0, 0.3, 0, false));
         return p;
     }
 }

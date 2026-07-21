@@ -4,7 +4,9 @@ import com.contactfront.engine.model.*;
 import com.contactfront.engine.model.Unit;
 import com.contactfront.engine.model.UnitProfile;
 import com.contactfront.engine.model.Faction;
+import com.contactfront.engine.model.SidcCode;
 import com.contactfront.ui.controller.GameController;
+import com.contactfront.ui.Log;
 import com.contactfront.ui.Palette;
 import com.contactfront.ui.TerrainBaker;
 import javafx.geometry.Bounds;
@@ -49,6 +51,7 @@ public class MapView {
     }
     
     public MapView(GameController ctrl, int tileSize, java.util.function.BiConsumer<Integer, Integer> onMapClick) {
+        Log.info("MapView: Initializing with tileSize=" + tileSize);
         this.ctrl = ctrl;
         this.tile = tileSize;
         this.onMapClick = onMapClick;
@@ -57,6 +60,7 @@ public class MapView {
         styleToggleButton(satelliteToggle);
         satelliteToggle.setOnAction(e -> {
             showSatellite = satelliteToggle.isSelected();
+            Log.info("MapView: Satellite toggle " + (showSatellite ? "ON" : "OFF"));
             redraw();
         });
         this.stack = new StackPane(canvas, satelliteToggle);
@@ -204,6 +208,7 @@ public class MapView {
     }
 
     public void redraw() {
+        Log.info("MapView.redraw: Showing satellite=" + showSatellite + " units=" + (ctrl.state != null ? ctrl.state.allUnits().size() : 0));
         GameState s = ctrl.state;
         if (s == null || s.grid == null) return;
         if (s.elevation != null && !showSatellite) {
@@ -296,6 +301,10 @@ public class MapView {
             g.setFill(Palette.SUCCESS);
             g.fillRect(d[0] * ts + ts / 2 - 4, d[1] * ts + ts - 6, 8, 5);
         }
+
+        drawObstacles(g, s, ts);
+
+        drawTacticalGraphics(g, s, ts);
 
         drawGhosts(g, s, ts);
 
@@ -434,39 +443,13 @@ public class MapView {
         boolean stale = enemy && s.visibility[u.y][u.x] != Visibility.VISIBLE;
         Color fill = enemy ? (stale ? Color.web("#8695aa") : Palette.HOSTILE) : Palette.FRIENDLY;
 
-        boolean isWestern = u.faction == Faction.USA || u.faction == Faction.CHINA;
-        boolean isRussianStyle = u.faction == Faction.RUSSIA || u.faction == Faction.IRAN;
-
-        g.setLineWidth(2);
-        g.setStroke(fill);
-        int r = ts / 2 - 4;
-
-        if (enemy) {
-            if (isRussianStyle) {
-                g.beginPath();
-                g.moveTo(cx, cy - r);
-                g.lineTo(cx + r * 0.85, cy - r * 0.15);
-                g.lineTo(cx + r, cy + r * 0.55);
-                g.lineTo(cx + r * 0.15, cy + r);
-                g.lineTo(cx - r, cy + r * 0.35);
-                g.lineTo(cx - r, cy - r * 0.15);
-                g.closePath();
-                g.stroke();
-            } else {
-                g.beginPath();
-                g.moveTo(cx, cy - r); g.lineTo(cx + r, cy); g.lineTo(cx, cy + r); g.lineTo(cx - r, cy);
-                g.closePath(); g.stroke();
-            }
+        if (u.sidcCode != null && !u.sidcCode.isEmpty()) {
+            SymbolRenderer.drawSymbol(g, new SidcCode(u.sidcCode), cx, cy, ts - 8, fill);
         } else {
-            if (isRussianStyle) {
-                g.strokeOval(cx - r, cy - r, r * 2, r * 2);
-            } else {
-                g.strokeRect(u.x * ts + 4, u.y * ts + 4, ts - 8, ts - 8);
-            }
+            boolean isWestern = u.faction == Faction.USA || u.faction == Faction.CHINA;
+            boolean isRussianStyle = u.faction == Faction.RUSSIA || u.faction == Faction.IRAN;
+            drawFallbackUnitShape(g, u, cx, cy, ts, enemy, isRussianStyle, fill);
         }
-
-        Color glyphColor = enemy ? (stale ? Color.web("#a0b0b8") : fill) : fill;
-        drawGlyph(g, u.profile.category(), cx, cy, r, glyphColor, enemy, isRussianStyle);
 
         int bw = ts - 8;
         int by = u.y * ts + ts - 7;
@@ -488,6 +471,39 @@ public class MapView {
             g.setFill(Color.web("#8695aa"));
             g.fillRect(u.x * ts + 3, u.y * ts + ts - 14, u.entrenchment * 4, 4);
         }
+    }
+
+    private void drawFallbackUnitShape(GraphicsContext g, Unit u, int cx, int cy, int ts, boolean enemy, boolean russianStyle, Color fill) {
+        g.setLineWidth(2);
+        g.setStroke(fill);
+        int r = ts / 2 - 4;
+
+        if (enemy) {
+            if (russianStyle) {
+                g.beginPath();
+                g.moveTo(cx, cy - r);
+                g.lineTo(cx + r * 0.85, cy - r * 0.15);
+                g.lineTo(cx + r, cy + r * 0.55);
+                g.lineTo(cx + r * 0.15, cy + r);
+                g.lineTo(cx - r, cy + r * 0.35);
+                g.lineTo(cx - r, cy - r * 0.15);
+                g.closePath();
+                g.stroke();
+            } else {
+                g.beginPath();
+                g.moveTo(cx, cy - r); g.lineTo(cx + r, cy); g.lineTo(cx, cy + r); g.lineTo(cx - r, cy);
+                g.closePath(); g.stroke();
+            }
+        } else {
+            if (russianStyle) {
+                g.strokeOval(cx - r, cy - r, r * 2, r * 2);
+            } else {
+                g.strokeRect(u.x * ts + 4, u.y * ts + 4, ts - 8, ts - 8);
+            }
+        }
+
+        Color glyphColor = enemy ? (fill) : fill;
+        drawGlyph(g, u.profile.category(), cx, cy, r, glyphColor, enemy, russianStyle);
     }
 
     private void drawGlyph(GraphicsContext g, UnitCategory cat, int cx, int cy, int r, Color c, boolean enemy, boolean russianStyle) {
@@ -648,4 +664,39 @@ public class MapView {
     }
 
     private double clamp01(double d) { return Math.max(0, Math.min(1, d)); }
+
+    private void drawTacticalGraphics(GraphicsContext g, GameState s, int ts) {
+        if (s.tacticalGraphics == null) return;
+        g.setStroke(Color.web("#d1a34f", 0.8));
+        g.setLineWidth(2);
+        for (var graphic : s.tacticalGraphics.getAllGraphics()) {
+            var points = graphic.points();
+            if (points.size() >= 2) {
+                double[] xs = new double[points.size()];
+                double[] ys = new double[points.size()];
+                for (int i = 0; i < points.size(); i++) {
+                    double[] pt = points.get(i);
+                    xs[i] = pt[0] * ts + ts / 2;
+                    ys[i] = pt[1] * ts + ts / 2;
+                }
+                g.strokePolyline(xs, ys, xs.length);
+            }
+        }
+    }
+
+    private void drawObstacles(GraphicsContext g, GameState s, int ts) {
+        if (s.obstacles == null) return;
+        g.setFill(Color.web("#8695aa", 0.7));
+        g.setStroke(Color.web("#3a5067", 0.9));
+        g.setLineWidth(1);
+        for (Obstacle obs : s.obstacles) {
+            for (double[] pt : obs.footprint()) {
+                int px = (int) pt[0], py = (int) pt[1];
+                if (px >= 0 && px < s.width() && py >= 0 && py < s.height()) {
+                    g.fillRect(px * ts, py * ts, ts, ts);
+                    g.strokeRect(px * ts, py * ts, ts, ts);
+                }
+            }
+        }
+    }
 }

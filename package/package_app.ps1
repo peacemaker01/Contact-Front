@@ -62,8 +62,9 @@ if ($LASTEXITCODE -ne 0) { throw "jar ufe failed" }
 Write-Host "==> Assembling jpackage input ($platform)"
 Copy-Jar "$Root\ui\target\contact-front-ui-$AppVersion.jar"
 Copy-Jar "$Root\engine\target\contact-front-engine-$AppVersion.jar"
+Copy-Jar "$Root\mil-sym-java-2.8.2.jar"
 Copy-Jar "$M2\org\json\json\20240303\json-20240303.jar"
-foreach ($m in @("base", "controls", "graphics")) {
+foreach ($m in @("base", "controls", "graphics", "swing")) {
     Copy-Jar "$M2\org\openjfx\javafx-$m\$FxVersion\javafx-$m-$FxVersion.jar"
     Copy-Jar "$M2\org\openjfx\javafx-$m\$FxVersion\javafx-$m-$FxVersion-$platform.jar"
 }
@@ -84,23 +85,23 @@ $platformOpts = @()
 if (-not $env:JAVA_HOME) { throw "JAVA_HOME must be set to a JDK 21+ (used as the bundled runtime)." }
 $runtimeImage = $env:JAVA_HOME
 
-$appImage = Join-Path $Dest "Contact Front"
+$appImage = Join-Path $Dest "ContactFront"
 if (Test-Path $appImage) { Remove-Item -Recurse -Force $appImage }
 
 Write-Host "==> Packaging app image (jpackage)"
 & $jpkg --type app-image `
-    --name "Contact Front" `
+    --name "ContactFront" `
     --runtime-image $runtimeImage `
     --input $Out `
     --main-jar "contact-front-ui-$AppVersion.jar" `
     --main-class com.contactfront.ui.App `
     --app-version $AppVersion `
     --dest $Dest `
-    --java-options "--module-path `$APPDIR --add-modules javafx.controls,javafx.graphics --enable-native-access=javafx.graphics" `
+    --java-options "--module-path `$APPDIR --add-modules javafx.controls,javafx.graphics,javafx.swing" `
     @iconArg @platformOpts
 
 if ($LASTEXITCODE -ne 0) { throw "jpackage failed" }
 
-$exe = Join-Path $Dest "Contact Front\Contact Front.exe"
+$exe = Join-Path $Dest "ContactFront\ContactFront.exe"
 if (Test-Path $exe) { Write-Host "==> App image ready: $exe" }
 else { Write-Host "==> App image written to $Dest" }

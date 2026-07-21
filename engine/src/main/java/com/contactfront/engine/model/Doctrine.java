@@ -136,6 +136,16 @@ public enum Doctrine {
         return getDefaultStance();
     }
 
+    public static Doctrine fromFaction(Faction f) {
+        return switch (f) {
+            case USA -> Doctrine.NATO;
+            case RUSSIA -> Doctrine.RUSSIAN;
+            case IRAN -> Doctrine.IRANIAN;
+            case CHINA -> Doctrine.CHINESE;
+            default -> Doctrine.NATO;
+        };
+    }
+
     private static int manhattan(int x1, int y1, int x2, int y2) {
         return Math.abs(x1 - x2) + Math.abs(y1 - y2);
     }

@@ -96,15 +96,28 @@ public final class Combat {
 
     private static void applyVehicleDamage(GameState s, Unit target, Random rng) {
         if (!target.isArmored()) return;
-        if (!target.mobilityKill && rng.nextDouble() < 0.3) {
+        double mobChance = target.damageModel.mobilityKillMultiplier() * 0.3;
+        if (!target.mobilityKill && rng.nextDouble() < mobChance) {
             target.mobilityKill = true;
             target.movement = Math.max(1, target.movement / 2);
             s.log("combat", target.profile.name() + " mobility killed (movement halved).");
         }
-        if (!target.firepowerKill && rng.nextDouble() < 0.2) {
-            target.firepowerKill = true;
-            target.baseAccuracy = Math.max(0, target.baseAccuracy - 30);
-            s.log("combat", target.profile.name() + " firepower killed (accuracy reduced).");
+        // Catastrophic cookoff check for Hull_Carousel DamageModel
+        if (target.damageModel == com.contactfront.engine.model.DamageModel.Hull_Carousel) {
+            // Calculate residual energy based on penetration and armor
+            double residualEnergy = 0.5 + rng.nextDouble() * 0.5; // 0.5-1.0 base energy
+            double pCookoff = residualEnergy * target.damageModel.cookoffMultiplier();
+            if (pCookoff > target.damageModel.catastrophicThreshold()) {
+                s.log("combat", target.profile.name() + " ammo cookoff - catastrophic kill!");
+                target.strength = 0;
+                target.destroyed = true;
+                if (target.faction == s.playerFaction) {
+                    s.friendlyKia++;
+                    s.vehiclesLost++;
+                } else {
+                    s.enemyKia++;
+                }
+            }
         }
     }
 

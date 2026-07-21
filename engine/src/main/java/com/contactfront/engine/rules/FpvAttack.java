@@ -12,6 +12,33 @@ public final class FpvAttack {
     private FpvAttack() {}
 
     public static boolean strike(GameState s, Unit attacker, Unit target, Random rng) {
+        // Check Recon_Linked requirement - needs spotter contact
+        if (attacker.droneInterface == com.contactfront.engine.model.DroneInterface.Recon_Linked) {
+            if (!hasSpotterContact(s, attacker)) {
+                s.log("combat", attacker.profile.name() + " needs spotter contact - aborting strike.");
+                attacker.destroyed = true;
+                return false;
+            }
+        }
+
+        // Check Direct_PiP signal attenuation under EW
+        if (attacker.droneInterface == com.contactfront.engine.model.DroneInterface.Direct_PiP && s.ewCommsJammed) {
+            int dist = Math.abs(attacker.x - target.x) + Math.abs(attacker.y - target.y);
+            double sRatio = 1.0 / Math.max(1.0, dist * dist / attacker.networkShieldMultiplier);
+            if (sRatio < 0.5) {
+                attacker.isJammed = true;
+                s.log("combat", attacker.profile.name() + " signal lost to EW - aborting strike.");
+                attacker.destroyed = true;
+                return false;
+            }
+        }
+
+        // INS drift for Waypoint_Saturation under GPS jamming
+        if (attacker.droneInterface == com.contactfront.engine.model.DroneInterface.Waypoint_Saturation && s.ewGpsJammed) {
+            attacker.insDriftAccumulated += attacker.droneInterface.insDriftRate() * 0.5; // 500ms tick
+            s.log("combat", attacker.profile.name() + " accumulating INS drift: " + (int) attacker.insDriftAccumulated + "m");
+        }
+
         Weapon w = attacker.weapons.stream().filter(x -> x.ammo > 0).findFirst().orElse(null);
         if (w == null) {
             s.log("combat", attacker.profile.name() + " has no FPV munitions left.");
@@ -46,5 +73,23 @@ public final class FpvAttack {
         attacker.destroyed = true;
         s.log("combat", attacker.profile.name() + " expended in explosion.");
         return true;
+    }
+
+    private static boolean hasSpotterContact(GameState s, Unit drone) {
+        for (Unit recon : s.friendlyUnits) {
+            if (recon.destroyed) continue;
+            if (drone.faction == s.playerFaction) {
+                if (s.enemyUnits.contains(drone)) continue; // friendly drone
+            }
+            int dist = Math.abs(recon.x - drone.x) + Math.abs(recon.y - drone.y);
+            if (dist <= recon.reconRadius) {
+                for (Unit known : s.enemyUnits) {
+                    if (known.knownToPlayer) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 }

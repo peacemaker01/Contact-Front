@@ -11,6 +11,11 @@ public class Tile {
     public int coverBonus;
     public double movementCost;
     public boolean blocksLos;
+    
+    public RoadSegment.RoadType roadType;
+    public double forestDensity;
+    public boolean isBridge;
+    public boolean isWaterway;
     public final List<Unit> units = new ArrayList<>();
 
     public Tile(Terrain type, int x, int y) {
@@ -20,6 +25,10 @@ public class Tile {
         this.coverBonus = type.coverBonus;
         this.movementCost = type.movementCost;
         this.blocksLos = type.blocksLos;
+        this.roadType = null;
+        this.forestDensity = 0.0;
+        this.isBridge = false;
+        this.isWaterway = false;
     }
 
     public boolean impassable() {

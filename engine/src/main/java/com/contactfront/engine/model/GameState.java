@@ -1,5 +1,7 @@
 package com.contactfront.engine.model;
 
+import com.contactfront.engine.trigger.TriggerSystem;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -52,6 +54,11 @@ public class GameState {
     public final List<RoadSegment> roadSegments = new ArrayList<>();
     /** OSM-derived building footprints for 3D extrusion. */
     public final List<Building> buildings = new ArrayList<>();
+    /** Editor-placed obstacles (minefields, barriers). */
+    public final List<Obstacle> obstacles = new ArrayList<>();
+    /** Editor-drawn tactical graphics (phase lines, assembly areas). */
+    public final TacticalGraphics tacticalGraphics = new TacticalGraphics();
+    public final TriggerSystem triggers = new TriggerSystem();
 
     public static final class LogEntry {
         public final String channel;
@@ -121,6 +128,13 @@ public class GameState {
     public Unit friendlyById(int id) {
         for (Unit u : friendlyUnits) if (u.id == id) return u;
         return null;
+    }
+
+    public List<Unit> allUnits() {
+        List<Unit> all = new ArrayList<>();
+        all.addAll(friendlyUnits);
+        all.addAll(enemyUnits);
+        return all;
     }
 
     public void log(String message) {

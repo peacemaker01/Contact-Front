@@ -107,7 +107,11 @@ public final class Profiles {
                     j.optInt("recon_radius", 4),
                     j.optInt("base_accuracy", 75),
                     j.optInt("radio_range", 10),
-                    special));
+                    special,
+                    j.optDouble("rcs_m2", 1.0),
+                    j.optDouble("thermal_signature", 0.5),
+                    j.optInt("armor_thickness", 0),
+                    j.optBoolean("era_present", false)));
         }
     }
 }

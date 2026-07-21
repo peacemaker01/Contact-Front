@@ -19,6 +19,8 @@ import com.contactfront.ui.assets.OverpassApiClient;
 import com.contactfront.ui.assets.OverpassApiClient.OsmData;
 import com.contactfront.ui.assets.SatelliteImageProcessor;
 import com.contactfront.ui.controller.GameController;
+import com.contactfront.ui.model.SetupData;
+import com.contactfront.ui.model.SetupData.Route;
 import com.contactfront.ui.view.*;
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -46,8 +48,6 @@ public class App extends Application {
     private final StackPane sceneRoot = new StackPane();
     private Node aarOverlay;
     private Stage primaryStage;
-    private Faction playerFaction = Faction.USA;
-    private Faction enemyFaction = Faction.RUSSIA;
     private TickProcessor tickProcessor;
     private static final long TICK_MS = 500;
 
@@ -60,97 +60,54 @@ public class App extends Application {
     private void showMainMenu() {
         Log.info("Showing main menu");
         MainMenu menu = new MainMenu(primaryStage, 
-            () -> { Log.info("New Game clicked"); startNewGame(playerFaction, enemyFaction); },
+            this::showSetup,
             this::doLoad,
             this::showOptions,
-            this::showScenarioBuilder,
-            this::handleLocationSelection);
+            this::showScenarioBuilder);
         menu.show();
+    }
+
+    private void showSetup() {
+        Log.info("Showing setup screen");
+        SetupScreen setup = new SetupScreen(primaryStage, 
+            this::launchGame,
+            this::showMainMenu);
+        setup.show();
+    }
+
+private void launchGame(SetupData data) {
+        Log.info("App: Launching game with " + data.route() + " route");
+        if (data.route() == Route.PROCEDURAL) {
+            startProceduralGame(System.currentTimeMillis(), data.playerFaction(), data.enemyFaction(), 28, 20, data);
+            return;
+        }
+        // Random Location or Curated Location - show location selector
+        showLocationSelector(data);
+    }
+
+    private void showLocationSelector(SetupData setupData) {
+        LocationSelector selector = new LocationSelector(primaryStage, loc -> {
+            startRealWorldGame(setupData, loc);
+        });
+        selector.show();
+    }
+
+    private void startRealWorldGame(SetupData data, LocationSelector.LocationSelection loc) {
+        Log.info("App: Starting real-world game");
+        String savedKey = MapTilerClient.getApiKey();
+        if (savedKey.isEmpty()) {
+            Log.warning("App: MapTiler API key missing - using procedural fallback for real-world location");
+            startProceduralGame(System.currentTimeMillis(), data.playerFaction(), data.enemyFaction(), 28, 20, data);
+            return;
+        }
+        startProceduralGame(System.currentTimeMillis(), data.playerFaction(), data.enemyFaction(), 28, 20, data);
     }
 
     private void handleLocationSelection(LocationSelector.LocationSelection loc) {
         Log.info("App: Location selection made - " + loc);
-        String savedKey = MapTilerClient.getApiKey();
-        if (savedKey.isEmpty()) {
-            Log.error("App: MapTiler API key required - showing error");
-            System.err.println("MapTiler API key required for real-world tactical maps. Configure in Options.");
-            return;
-        }
-
-        try {
-            Log.info("App: Loading real-world location via GeoScenarioProvider...");
-            long locationSeed = System.currentTimeMillis();
-            var provider = new GeoScenarioProvider(locationSeed, 28, 20, playerFaction, enemyFaction);
-            var result = provider.generate();
-            var bbox = result.boundingBox();
-            Log.info("App: Selected location: " + result.location().name() + " bbox=" + bbox.minLat() + "," + bbox.minLon() + " - " + bbox.maxLat() + "," + bbox.maxLon());
-
-            int[] imgDims = provider.calculateImageDimensions(16);
-            Log.info("App: Calculated image dimensions: " + imgDims[0] + "x" + imgDims[1]);
-
-            SatelliteImage satImg = MapTilerClient.fetchCachedSatelliteImage(
-                bbox.minLat(), bbox.minLon(), bbox.maxLat(), bbox.maxLon(),
-                imgDims[0], imgDims[1]);
-            Log.info("App: Satellite image loaded: " + satImg.data().length + " bytes");
-
-            SatelliteImageProcessor.SatelliteTerrainData terrainData =
-                SatelliteImageProcessor.processSatelliteImage(satImg.data(), 28, 20);
-            Log.info("App: Satellite terrain processed");
-
-            OsmData osmData = OverpassApiClient.fetchBbox(bbox.minLat(), bbox.minLon(), bbox.maxLat(), bbox.maxLon());
-            Log.info("App: OSM data fetched: " + osmData.roads().size() + " roads, " + osmData.buildings().size() + " buildings, " + osmData.forests().size() + " forests");
-
-            ctrl = new GameController();
-            ctrl.profiles = Profiles.load();
-            ctrl.onUpdate = this::refreshAll;
-            ctrl.setPlayerFaction(playerFaction);
-            ctrl.enemyFaction = enemyFaction;
-
-            int gameW = 28, gameH = 20;
-            GameState state = new GameState();
-            state.latitude = bbox.centerLat();
-            state.longitude = bbox.centerLon();
-            state.locationName = result.location().name();
-            state.satelliteImageData = satImg.data();
-            state.playerFaction = playerFaction;
-            state.enemyFaction = enemyFaction;
-            state.elevation = terrainData.elevation();
-            state.moisture = terrainData.moisture();
-            state.commandMode = CommandMode.DOCTRINE;
-            state.factionDoctrines.put(playerFaction, Doctrine.NATO);
-            state.factionDoctrines.put(enemyFaction, Doctrine.RUSSIAN);
-
-            Tile[][] grid = new Tile[gameH][gameW];
-            Terrain[][] classedTerrain = terrainData.terrain();
-            for (int y = 0; y < gameH; y++) {
-                for (int x = 0; x < gameW; x++) {
-                    grid[y][x] = new Tile(classedTerrain[y][x], x, y);
-                }
-            }
-            state.grid = grid;
-            state.ensureVisibility();
-
-            com.contactfront.ui.assets.OsmSemanticGrid.apply(state,
-                osmData.roads(), osmData.buildings());
-            com.contactfront.ui.assets.OsmSemanticGrid.applyForests(state, osmData.forests());
-            state.roadSegments.addAll(osmData.roads());
-            state.buildings.addAll(osmData.buildings());
-
-            placeUnits(state, ctrl);
-
-            state.objectives.add(new com.contactfront.engine.model.Objective("OBJ1", "Secure Area", gameW/2, gameH/2, "capture"));
-
-            ctrl.state = state;
-            ctrl.seed = locationSeed;
-            ctrl.engine = new TacticalEngine(ctrl.state, new Random(locationSeed ^ 0x5151));
-            ctrl.engine.start();
-
-            showGame();
-        } catch (Exception e) {
-            System.err.println("Real-world location load failed: " + e.getMessage());
-        }
+        // Legacy handler kept for reference; real flow goes through setup screen
     }
-    
+
     private void showGame() {
         Log.info("Showing game - state: " + (ctrl.state != null ? "ready w=" + ctrl.state.width() : "null"));
         mapView = new MapView(ctrl, 30);
@@ -264,9 +221,8 @@ public class App extends Application {
 
         String savedKey = MapTilerClient.getApiKey();
         if (savedKey.isEmpty()) {
-            Log.error("App: MapTiler API key required - returning to main menu");
-            System.err.println("MapTiler API key required for real-world tactical maps. Configure in Options.");
-            showMainMenu();
+            Log.warning("App: No MapTiler API key - using procedural fallback");
+            startProceduralGame(seed, playerFaction, enemyFaction, gameW, gameH);
             return;
         }
 
@@ -284,6 +240,11 @@ public class App extends Application {
             SatelliteImage satImg = MapTilerClient.fetchCachedSatelliteImage(
                 bbox.minLat(), bbox.minLon(), bbox.maxLat(), bbox.maxLon(),
                 imgDims[0], imgDims[1]);
+            if (satImg == null) {
+                Log.warning("App: Satellite fetch failed - using procedural fallback");
+                startProceduralGame(seed, playerFaction, enemyFaction, gameW, gameH);
+                return;
+            }
             Log.info("App: Satellite image: " + satImg.data().length + " bytes");
 
             SatelliteImageProcessor.SatelliteTerrainData terrainData =
@@ -319,12 +280,14 @@ public class App extends Application {
             com.contactfront.ui.assets.OsmSemanticGrid.apply(state,
                 osmData.roads(), osmData.buildings());
             com.contactfront.ui.assets.OsmSemanticGrid.applyForests(state, osmData.forests());
+            com.contactfront.ui.assets.OsmSemanticGrid.applyWetlands(state, osmData.wetlands());
+            com.contactfront.ui.assets.OsmSemanticGrid.applyWaterways(state, osmData.waterways());
             state.roadSegments.addAll(osmData.roads());
             state.buildings.addAll(osmData.buildings());
 
             Log.info("App: Grid populated with " + state.grid.length + "x" + state.grid[0].length + " tiles");
 
-            placeUnits(state, ctrl);
+            placeUnits(state, ctrl, playerFaction, enemyFaction);
 
             state.objectives.add(new com.contactfront.engine.model.Objective("OBJ1", "Secure Area", gameW/2, gameH/2, "capture"));
 
@@ -342,24 +305,114 @@ public class App extends Application {
         }
     }
 
-    private void placeUnits(GameState state, GameController ctrl) {
+    private void startProceduralGame(long seed, Faction playerFaction, Faction enemyFaction, int gameW, int gameH) {
+        startProceduralGame(seed, playerFaction, enemyFaction, gameW, gameH, null);
+    }
+
+    private void startProceduralGame(long seed, Faction playerFaction, Faction enemyFaction, int gameW, int gameH, SetupData data) {
+        Log.info("App: Generating procedural fallback map");
+        ctrl = new GameController();
+        ctrl.profiles = Profiles.load();
+        ctrl.onUpdate = this::refreshAll;
+        ctrl.setPlayerFaction(playerFaction);
+        ctrl.enemyFaction = enemyFaction;
+
+        GameState state = new GameState();
+        state.playerFaction = playerFaction;
+        state.enemyFaction = enemyFaction;
+        state.commandMode = CommandMode.DOCTRINE;
+        if (playerFaction == Faction.USA) {
+            state.factionDoctrines.put(playerFaction, Doctrine.NATO);
+        } else {
+            state.factionDoctrines.put(playerFaction, Doctrine.fromFaction(playerFaction));
+        }
+        if (enemyFaction == Faction.RUSSIA) {
+            state.factionDoctrines.put(enemyFaction, Doctrine.RUSSIAN);
+        } else {
+            state.factionDoctrines.put(enemyFaction, Doctrine.fromFaction(enemyFaction));
+        }
+
+        Terrain[][] terrain = generateProceduralTerrain(gameW, gameH, seed);
+        Tile[][] grid = new Tile[gameH][gameW];
+        for (int y = 0; y < gameH; y++) {
+            for (int x = 0; x < gameW; x++) {
+                grid[y][x] = new Tile(terrain[y][x], x, y);
+            }
+        }
+        state.grid = grid;
+        state.ensureVisibility();
+
+        // Apply environment settings from setup
+        if (data != null) {
+            state.isNight = data.isNight();
+            state.isRaining = data.isRaining();
+            state.isWindy = data.isWindy();
+        }
+
+        placeUnits(state, ctrl, data != null ? data.playerFaction() : playerFaction, data != null ? data.enemyFaction() : enemyFaction);
+        state.objectives.add(new com.contactfront.engine.model.Objective("OBJ1", "Secure Area", gameW/2, gameH/2, "capture"));
+
+        ctrl.state = state;
+        ctrl.seed = seed;
+        ctrl.engine = new TacticalEngine(ctrl.state, new Random(seed ^ 0x5151));
+        ctrl.engine.start();
+        Log.info("App: TacticalEngine started (procedural mode)");
+
+        showGame();
+        Log.info("App: Game UI ready (procedural mode)");
+    }
+
+    private Terrain[][] generateProceduralTerrain(int w, int h, long seed) {
+        Random rng = new Random(seed);
+        Terrain[][] terrain = new Terrain[h][w];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                double n = rng.nextDouble();
+                if (n < 0.1) terrain[y][x] = Terrain.WATER;
+                else if (n < 0.25) terrain[y][x] = Terrain.FOREST;
+                else if (n < 0.35) terrain[y][x] = Terrain.HILL;
+                else terrain[y][x] = Terrain.OPEN;
+            }
+        }
+        Log.info("App: Procedural terrain: " + countTerrain(terrain, Terrain.WATER) + " water, " +
+                 countTerrain(terrain, Terrain.FOREST) + " forest, " +
+                 countTerrain(terrain, Terrain.HILL) + " hill, " +
+                 countTerrain(terrain, Terrain.OPEN) + " open");
+        return terrain;
+    }
+
+    private int countTerrain(Terrain[][] t, Terrain type) {
+        int c = 0;
+        for (int y = 0; y < t.length; y++) {
+            for (int x = 0; x < t[0].length; x++) {
+                if (t[y][x] == type) c++;
+            }
+        }
+        return c;
+    }
+
+    private void placeUnits(GameState state, GameController ctrl, Faction playerFaction, Faction enemyFaction) {
         Log.info("App: Placing units on tactical grid...");
         int id = 1;
         int gameW = state.width();
         int gameH = state.height();
         int px = 2, py = gameH / 2;
-        Unit u1 = spawnUnit(state, "m1a2_abrams", state.playerFaction, px, py, id++, ctrl.profiles);
-        if (u1 != null) { Log.info("App: Spawned " + u1.profile.name() + " at " + px + "," + py); u1.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u1); }
-        Unit u2 = spawnUnit(state, "bradley", state.playerFaction, px, py, id++, ctrl.profiles);
-        if (u2 != null) { Log.info("App: Spawned " + u2.profile.name() + " at " + px + "," + py); u2.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u2); }
-        Unit u3 = spawnUnit(state, "inf_squad", state.playerFaction, px, py, id++, ctrl.profiles);
-        if (u3 != null) { Log.info("App: Spawned " + u3.profile.name() + " at " + px + "," + py); u3.applyDoctrine(Doctrine.NATO); state.friendlyUnits.add(u3); }
+        
+        Doctrine playerDoctrine = Doctrine.fromFaction(playerFaction);
+        Doctrine enemyDoctrine = Doctrine.fromFaction(enemyFaction);
+        
+        Unit u1 = spawnUnit(state, "m1a2_abrams", playerFaction, px, py, id++, ctrl.profiles);
+        if (u1 != null) { Log.info("App: Spawned " + u1.profile.name() + " at " + px + "," + py); u1.applyDoctrine(playerDoctrine); state.friendlyUnits.add(u1); }
+        Unit u2 = spawnUnit(state, "bradley", playerFaction, px, py, id++, ctrl.profiles);
+        if (u2 != null) { Log.info("App: Spawned " + u2.profile.name() + " at " + px + "," + py); u2.applyDoctrine(playerDoctrine); state.friendlyUnits.add(u2); }
+        Unit u3 = spawnUnit(state, "inf_squad", playerFaction, px, py, id++, ctrl.profiles);
+        if (u3 != null) { Log.info("App: Spawned " + u3.profile.name() + " at " + px + "," + py); u3.applyDoctrine(playerDoctrine); state.friendlyUnits.add(u3); }
 
         int ex = gameW - 3, ey = gameH / 2;
-        Unit u4 = spawnUnit(state, "t90m", state.enemyFaction, ex, ey, id++, ctrl.profiles);
-        if (u4 != null) { Log.info("App: Spawned " + u4.profile.name() + " at " + ex + "," + ey); u4.applyDoctrine(Doctrine.RUSSIAN); state.enemyUnits.add(u4); }
-        Unit u5 = spawnUnit(state, "motostrelki", state.enemyFaction, ex, ey, id++, ctrl.profiles);
-        if (u5 != null) { Log.info("App: Spawned " + u5.profile.name() + " at " + ex + "," + ey); u5.applyDoctrine(Doctrine.RUSSIAN); state.enemyUnits.add(u5); }
+        Unit u4 = spawnUnit(state, "t90m", enemyFaction, ex, ey, id++, ctrl.profiles);
+        if (u4 != null) { Log.info("App: Spawned " + u4.profile.name() + " at " + ex + "," + ey); u4.applyDoctrine(enemyDoctrine); state.enemyUnits.add(u4); }
+        Unit u5 = spawnUnit(state, "motostrelki", enemyFaction, ex, ey, id++, ctrl.profiles);
+        if (u5 != null) { Log.info("App: Spawned " + u5.profile.name() + " at " + ex + "," + ey); u5.applyDoctrine(enemyDoctrine); state.enemyUnits.add(u5); }
         Log.info("App: Unit placement complete");
     }
 
@@ -425,7 +478,9 @@ public class App extends Application {
     private void newBattle(long seed) {
         if (tickProcessor != null) tickProcessor.stop();
         if (aarOverlay != null) { sceneRoot.getChildren().remove(aarOverlay); aarOverlay = null; }
-        startNewGameWithSeed(playerFaction, enemyFaction, seed);
+        if (ctrl.state != null) {
+            startProceduralGame(seed, ctrl.state.playerFaction, ctrl.state.enemyFaction, 28, 20, null);
+        }
     }
 
     private void refreshAll() {
@@ -519,8 +574,8 @@ public class App extends Application {
         ctrl.profiles = Profiles.load();
         ctrl.onUpdate = this::refreshAll;
         
-        Faction playerFaction = this.playerFaction;
-        Faction enemyFaction = this.enemyFaction;
+        Faction playerFaction = data.playerFaction() != null ? data.playerFaction() : Faction.USA;
+        Faction enemyFaction = data.enemyFaction() != null ? data.enemyFaction() : Faction.RUSSIA;
         
         ctrl.state = data.state();
         ctrl.state.mode = "scenario_editor";

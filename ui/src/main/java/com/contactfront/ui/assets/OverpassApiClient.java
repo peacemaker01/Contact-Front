@@ -22,7 +22,8 @@ public final class OverpassApiClient {
 
     private OverpassApiClient() {}
 
-    public static record OsmData(List<RoadSegment> roads, List<Building> buildings, List<double[][]> forests) {}
+    public static record OsmData(List<RoadSegment> roads, List<Building> buildings, List<double[][]> forests,
+                               List<double[][]> wetlands, List<WaterwaySegment> waterways) {}
 
     public static OsmData fetchBbox(double minLat, double minLon, double maxLat, double maxLon) throws IOException, InterruptedException {
         Log.info(String.format("OverpassApiClient fetching OSM data: bbox lat=%.4f-%.4f, lon=%.4f-%.4f", minLat, maxLat, minLon, maxLon));
@@ -32,9 +33,12 @@ public final class OverpassApiClient {
               way["highway"](%f,%f,%f,%f);
               way["building"](%f,%f,%f,%f);
               way["landuse"="forest"](%f,%f,%f,%f);
+              way["natural"="wetland"](%f,%f,%f,%f);
+              way["waterway"](%f,%f,%f,%f);
             );
             out geom;
-            """, minLat, minLon, maxLat, maxLon, minLat, minLon, maxLat, maxLon, minLat, minLon, maxLat, maxLon);
+            """, minLat, minLon, maxLat, maxLon, minLat, minLon, maxLat, maxLon, minLat, minLon, maxLat, maxLon,
+                minLat, minLon, maxLat, maxLon, minLat, minLon, maxLat, maxLon);
 
         Log.info("OverpassApiClient posting query to: " + OVERPASS_ENDPOINT);
         HttpRequest request = HttpRequest.newBuilder()
@@ -50,8 +54,8 @@ public final class OverpassApiClient {
         }
 
         OsmData data = parseOsm(response.body());
-        Log.info(String.format("OverpassApiClient fetch complete: %d roads, %d buildings, %d forests", 
-            data.roads.size(), data.buildings.size(), data.forests.size()));
+        Log.info(String.format("OverpassApiClient fetch complete: %d roads, %d buildings, %d forests, %d wetlands, %d waterways",
+            data.roads.size(), data.buildings.size(), data.forests.size(), data.wetlands.size(), data.waterways.size()));
         return data;
     }
 
@@ -60,6 +64,8 @@ public final class OverpassApiClient {
         List<RoadSegment> roads = new ArrayList<>();
         List<Building> buildings = new ArrayList<>();
         List<double[][]> forests = new ArrayList<>();
+        List<double[][]> wetlands = new ArrayList<>();
+        List<WaterwaySegment> waterways = new ArrayList<>();
 
         JSONObject root = new JSONObject(json);
         JSONArray elements = root.getJSONArray("elements");
@@ -82,11 +88,23 @@ public final class OverpassApiClient {
 
             if ("forest".equals(elem.optString("landuse", ""))) {
                 forests.add(parseForest(elem));
+                continue;
+            }
+
+            if ("wetland".equals(elem.optString("natural", ""))) {
+                wetlands.add(parseWetland(elem));
+                continue;
+            }
+
+            String waterway = elem.optString("waterway", "");
+            if (!waterway.isEmpty()) {
+                waterways.add(parseWaterway(elem));
             }
         }
 
-        Log.info("OverpassApiClient parsed: " + roads.size() + " ways, " + buildings.size() + " buildings, " + forests.size() + " forests");
-        return new OsmData(roads, buildings, forests);
+        Log.info("OverpassApiClient parsed: " + roads.size() + " roads, " + buildings.size() + " buildings, " +
+            forests.size() + " forests, " + wetlands.size() + " wetlands, " + waterways.size() + " waterways");
+        return new OsmData(roads, buildings, forests, wetlands, waterways);
     }
 
     private static RoadSegment parseRoad(JSONObject elem, String highway) {
@@ -106,6 +124,7 @@ public final class OverpassApiClient {
             case "primary" -> RoadType.PRIMARY;
             case "secondary" -> RoadType.SECONDARY;
             case "tertiary" -> RoadType.TERTIARY;
+            case "unclassified", "road" -> RoadType.UNCLASSIFIED;
             case "residential" -> RoadType.RESIDENTIAL;
             case "service" -> RoadType.SERVICE;
             default -> RoadType.UNCLASSIFIED;
@@ -129,6 +148,38 @@ public final class OverpassApiClient {
         return points.toArray(double[][]::new);
     }
 
+    private static double[][] parseWetland(JSONObject elem) {
+        JSONArray coords = elem.optJSONArray("geometry");
+        List<double[]> points = new ArrayList<>();
+        if (coords != null) {
+            for (int i = 0; i < coords.length(); i++) {
+                JSONObject c = coords.getJSONObject(i);
+                double lon = c.getDouble("lon");
+                double lat = c.getDouble("lat");
+                points.add(new double[]{lon, lat});
+            }
+        }
+        Log.info("OverpassApiClient parsed wetland: " + points.size() + " points");
+        return points.toArray(double[][]::new);
+    }
+
+    private static WaterwaySegment parseWaterway(JSONObject elem) {
+        JSONArray coords = elem.optJSONArray("geometry");
+        List<double[]> points = new ArrayList<>();
+        if (coords != null) {
+            for (int i = 0; i < coords.length(); i++) {
+                JSONObject c = coords.getJSONObject(i);
+                double lon = c.getDouble("lon");
+                double lat = c.getDouble("lat");
+                points.add(new double[]{lon, lat});
+            }
+        }
+        boolean bridge = elem.optBoolean("bridge", false);
+        boolean ford = "yes".equals(elem.optString("ford", ""));
+        Log.info("OverpassApiClient parsed waterway (" + elem.optString("waterway") + "), bridge=" + bridge + ", ford=" + ford);
+        return new WaterwaySegment(points, bridge, ford);
+    }
+
     private static Building parseBuilding(JSONObject elem) {
         JSONArray coords = elem.optJSONArray("geometry");
         List<double[]> points = new ArrayList<>();
@@ -144,4 +195,6 @@ public final class OverpassApiClient {
         Log.info("OverpassApiClient parsed building: " + points.size() + " points, height=" + height);
         return new Building(points, height);
     }
+
+    public static record WaterwaySegment(List<double[]> points, boolean bridge, boolean ford) {}
 }

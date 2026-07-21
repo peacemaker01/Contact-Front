@@ -12,7 +12,11 @@ public record UnitProfile(
         int reconRadius,
         int baseAccuracy,
         int radioRange,
-        List<String> special
+        List<String> special,
+        double rcsM2,
+        double thermalSignature,
+        int armorThickness,
+        boolean eraPresent
 ) {
     public UnitProfile {
         if (weapons == null) weapons = List.of();

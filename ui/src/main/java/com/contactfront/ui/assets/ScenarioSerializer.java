@@ -1,5 +1,6 @@
 package com.contactfront.ui.assets;
 
+import com.contactfront.engine.model.*;
 import com.contactfront.engine.model.CommandMode;
 import com.contactfront.engine.model.Doctrine;
 import com.contactfront.engine.model.Faction;
@@ -15,6 +16,7 @@ import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Stream;
+import java.util.ArrayList;
 
 public final class ScenarioSerializer {
     private static final String JSON_INDENT = "  ";
@@ -71,8 +73,47 @@ public final class ScenarioSerializer {
                 .append(", \"x\": ").append(u.x)
                 .append(", \"y\": ").append(u.y)
                 .append(", \"id\": ").append(u.id)
-                .append(", \"destroyed\": ").append(u.destroyed).append("}");
+                .append(", \"destroyed\": ").append(u.destroyed)
+                .append(", \"sidc\": \"").append(u.sidcCode != null ? u.sidcCode : "").append("\"}");
             firstUnit = false;
+        }
+        json.append("\n").append(JSON_INDENT).append("],\n");
+
+        // Obstacles
+        json.append(JSON_INDENT).append("\"obstacles\": [\n");
+        boolean firstObs = true;
+        for (Obstacle o : state.obstacles) {
+            if (!firstObs) json.append(",\n");
+            json.append(JSON_INDENT).append(JSON_INDENT)
+                .append("{\"type\": \"").append(o.type().name()).append("\"");
+            json.append(", \"footprint\": [");
+            boolean firstPt = true;
+            for (double[] p : o.footprint()) {
+                if (!firstPt) json.append(", ");
+                json.append("[").append((int)p[0]).append(",").append((int)p[1]).append("]");
+                firstPt = false;
+            }
+            json.append("]}");
+            firstObs = false;
+        }
+        json.append("\n").append(JSON_INDENT).append("],\n");
+
+        // Tactical graphics
+        json.append(JSON_INDENT).append("\"tactical_graphics\": [\n");
+        boolean firstGraph = true;
+        for (TacticalGraphics.Graphic g : state.tacticalGraphics.graphics()) {
+            if (!firstGraph) json.append(",\n");
+            json.append(JSON_INDENT).append(JSON_INDENT)
+                .append("{\"type\": \"").append(g.type().name()).append("\"");
+            json.append(", \"points\": [");
+            boolean firstPt = true;
+            for (double[] p : g.points()) {
+                if (!firstPt) json.append(", ");
+                json.append("[").append((int)p[0]).append(",").append((int)p[1]).append("]");
+                firstPt = false;
+            }
+            json.append("]}");
+            firstGraph = false;
         }
         json.append("\n").append(JSON_INDENT).append("],\n");
         
@@ -156,6 +197,8 @@ public final class ScenarioSerializer {
         }
         
         parseUnits(json, state, data);
+        parseObstacles(json, state);
+        parseGraphics(json, state);
         parseObjectives(json, state);
         
         return state;
@@ -196,6 +239,7 @@ public final class ScenarioSerializer {
             
             Unit unit = new Unit(nextId++, placedFaction, profile, x, y, profiles);
             unit.destroyed = extractString(unitJson, "destroyed", "false").equals("true");
+            unit.sidcCode = extractString(unitJson, "sidc", null);
             
             state.placedUnits.add(unit);
         }
@@ -206,6 +250,26 @@ public final class ScenarioSerializer {
             } else {
                 state.enemyUnits.add(u);
             }
+        }
+    }
+
+    private static void parseObstacles(String json, GameState state) {
+        List<String> obsSection = extractArray(json, "obstacles");
+        for (String obsJson : obsSection) {
+            String typeStr = extractString(obsJson, "type", "MINEFIELD");
+            Obstacle.ObstacleType type = Obstacle.ObstacleType.valueOf(typeStr);
+            // Note: footprint parsing would require more complex JSON array extraction
+            state.obstacles.add(new Obstacle(0, 0, type));
+        }
+    }
+
+    private static void parseGraphics(String json, GameState state) {
+        List<String> graphSection = extractArray(json, "tactical_graphics");
+        for (String graphJson : graphSection) {
+            String typeStr = extractString(graphJson, "type", "PHASE_LINE");
+            TacticalGraphics.GraphicType type = TacticalGraphics.GraphicType.valueOf(typeStr);
+            // Note: points parsing would require more complex JSON array extraction
+            state.tacticalGraphics.addLine(type, new ArrayList<>());
         }
     }
 

@@ -1,5 +1,6 @@
 package com.contactfront.engine.terrain;
 
+import com.contactfront.engine.Log;
 import com.contactfront.engine.data.LocationProfile;
 import com.contactfront.engine.data.LocationRegistry;
 import com.contactfront.engine.model.Faction;
@@ -24,6 +25,7 @@ public final class GeoScenarioProvider {
 
     public GeoScenarioProvider(long seed, int width, int height, Faction playerFaction, Faction enemyFaction, 
                                 LocationRegistry registry) {
+        Log.info("GeoScenarioProvider: Creating with seed=" + seed + " dims=" + width + "x" + height);
         this.seed = seed;
         this.width = width;
         this.height = height;
@@ -31,10 +33,13 @@ public final class GeoScenarioProvider {
         this.enemyFaction = enemyFaction;
         this.registry = registry;
         this.selectedLocation = selectRandomLocation();
+        Log.info("GeoScenarioProvider: Selected location " + selectedLocation.name() + " at (" + selectedLocation.boundingBox().centerLat() + "," + selectedLocation.boundingBox().centerLon() + ")");
     }
 
     public LocationProfile selectRandomLocation() {
-        return registry.selectBySeed(seed);
+        LocationProfile loc = registry.selectBySeed(seed);
+        Log.info("GeoScenarioProvider.selectRandomLocation: " + loc.name());
+        return loc;
     }
 
     public LocationProfile getSelectedLocation() {

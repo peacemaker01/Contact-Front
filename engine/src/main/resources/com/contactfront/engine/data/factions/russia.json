@@ -1,0 +1,7 @@
+{
+  "network_topology": "Centralized",
+  "sensor_emission": "Active RF",
+  "damage_model": "Hull Carousel",
+  "drone_interface": "Recon Linked",
+  "network_shield_multiplier": 1.0
+}
